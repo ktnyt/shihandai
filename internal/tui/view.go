@@ -1,0 +1,170 @@
+package tui
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/ktnyt/shihandai/internal/curriculum"
+	"github.com/ktnyt/shihandai/internal/drill"
+	"github.com/ktnyt/shihandai/internal/naginata"
+)
+
+var (
+	styleTitle   = lipgloss.NewStyle().Bold(true)
+	styleFaint   = lipgloss.NewStyle().Faint(true)
+	styleDone    = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "28", Dark: "42"})
+	styleCurrent = lipgloss.NewStyle().Reverse(true).Bold(true)
+	styleTodo    = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "240", Dark: "250"})
+	styleError   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "160", Dark: "203"}).Bold(true)
+	styleNotice  = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "26", Dark: "75"}).Bold(true)
+	styleHint    = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "94", Dark: "220"})
+)
+
+// View は画面を描画する。
+func (m Model) View() string {
+	if m.err != nil {
+		return "エラー: " + m.err.Error() + "\n"
+	}
+
+	var b strings.Builder
+	allowed := m.drill.Allowed()
+	newest := allowed[len(allowed)-1]
+
+	fmt.Fprintf(&b, "%s  %s\n",
+		styleTitle.Render("shihandai — 薙刀式タイピング練習"),
+		styleFaint.Render("(Esc で終了)"))
+	fmt.Fprintf(&b, "レベル %d/%d  かな %d文字  いまの段階: %s\n\n",
+		m.drill.Level, curriculum.MaxLevel(), len(allowed), curriculum.GroupOf(newest))
+
+	fmt.Fprintf(&b, "%s %s\n\n",
+		styleFaint.Render("使えるかな:"),
+		wrapKana(allowed, max(m.width-8, 40)))
+
+	if m.state == stateLoading {
+		b.WriteString(styleFaint.Render("例文を生成中…") + "\n")
+		return b.String()
+	}
+
+	// 例文（入力済み、現在位置、残りで塗り分ける）
+	line := m.drill.Line()
+	pos := m.drill.Pos()
+	var lineView strings.Builder
+	for i, u := range line {
+		switch {
+		case i < pos:
+			lineView.WriteString(styleDone.Render(u))
+		case i == pos:
+			lineView.WriteString(styleCurrent.Render(u))
+		default:
+			lineView.WriteString(styleTodo.Render(u))
+		}
+	}
+	b.WriteString("  " + lineView.String() + "\n\n")
+
+	// 次に打つかなの運指ヒント
+	if expected := m.drill.Expected(); expected != "" {
+		if chord, ok := naginata.ChordFor(expected); ok {
+			fmt.Fprintf(&b, "  つぎ: %s %s\n",
+				styleCurrent.Render(expected),
+				styleHint.Render("["+chord.Label()+"]"))
+		}
+	}
+
+	// ステータス行
+	kpm := m.drill.KPM(time.Now(), m.engine.Presses())
+	fmt.Fprintf(&b, "\n  kpm %5.0f / %.0f   ミス %d   例文: %s\n",
+		kpm, m.drill.Cfg.TargetKPM, m.drill.LineErrors(), sourceLabel(m.line.Source, m.llmName))
+
+	if m.flash != "" {
+		b.WriteString("  " + styleError.Render(m.flash) + "\n")
+	}
+	if m.message != "" {
+		b.WriteString("  " + styleNotice.Render(m.message) + "\n")
+	}
+
+	if weak := m.weakUnits(3); weak != "" {
+		b.WriteString("\n" + styleFaint.Render("にがて: "+weak) + "\n")
+	}
+	return b.String()
+}
+
+// weakUnits は直近正答率の低いかなを上位 n 件返す。
+func (m Model) weakUnits(n int) string {
+	type item struct {
+		unit string
+		acc  float64
+	}
+	var items []item
+	for _, u := range m.drill.Allowed() {
+		s, ok := m.drill.Stats[u]
+		if !ok || len(s.Recent) == 0 {
+			continue
+		}
+		if acc := s.RecentAccuracy(); acc < 1 {
+			items = append(items, item{u, acc})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].acc < items[j].acc })
+	var parts []string
+	for i, it := range items {
+		if i >= n {
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s %.0f%%", it.unit, it.acc*100))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func wrapKana(units []string, width int) string {
+	joined := strings.Join(units, " ")
+	if lipgloss.Width(joined) <= width {
+		return joined
+	}
+	// 長くなったら末尾側を優先して表示する
+	for i := range units {
+		rest := strings.Join(units[i:], " ")
+		if lipgloss.Width(rest)+2 <= width {
+			return "… " + rest
+		}
+	}
+	return joined
+}
+
+func sourceLabel(source, llmName string) string {
+	switch source {
+	case "llm":
+		return llmName
+	case "wordbank":
+		return "単語バンク"
+	}
+	return "-"
+}
+
+func outcomeMessage(out drill.Outcome, targetKPM float64) string {
+	switch {
+	case out.Demoted:
+		return fmt.Sprintf("「%s」の正答率が下がったのでレベルダウン (kpm %.0f)", out.WeakUnit, out.KPM)
+	case out.Promoted:
+		return fmt.Sprintf("ノーミス kpm %.0f! 新しいかなを追加", out.KPM)
+	case out.Errors == 0:
+		return fmt.Sprintf("ノーミス kpm %.0f (昇格には %.0f 必要)", out.KPM, targetKPM)
+	default:
+		return fmt.Sprintf("kpm %.0f  ミス %d", out.KPM, out.Errors)
+	}
+}
+
+func printable(text string) string {
+	switch text {
+	case " ":
+		return "␣"
+	case "\b":
+		return "BS"
+	case "\n":
+		return "⏎"
+	}
+	return text
+}
