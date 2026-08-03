@@ -31,14 +31,15 @@ type Model struct {
 	statePath string
 	llmName   string
 
-	state   state
-	line    sentence.Line
-	next    *lineMsg // 打鍵中に先読みした次の行
-	pending bool     // 生成リクエストが飛んでいる間 true
-	width   int
-	message string
-	flash   string
-	err     error
+	state        state
+	line         sentence.Line
+	next         *lineMsg // 打鍵中に先読みした次の行
+	pending      bool     // 生成リクエストが飛んでいる間 true
+	loadingSince time.Time
+	width        int
+	message      string
+	flash        string
+	err          error
 }
 
 // New は画面を作る。
@@ -50,6 +51,9 @@ func New(engine *naginata.Engine, d *drill.Drill, gen *sentence.Generator, state
 		statePath: statePath,
 		llmName:   llmName,
 		state:     stateLoading,
+		// Init が返す生成コマンドの分。Init はモデルを返せないのでここで立てる
+		pending:      true,
+		loadingSince: time.Now(),
 	}
 }
 
@@ -61,21 +65,16 @@ type lineMsg struct {
 	err   error
 }
 
+type saveErrMsg struct{ err error }
+
 func (m Model) tick() tea.Cmd {
 	return tea.Tick(tickInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
-// generate は現在のレベルに合わせて1行生成するコマンドを返す。
-// すでにリクエストが飛んでいれば何もしない。
-func (m *Model) generate() tea.Cmd {
-	if m.pending {
-		return nil
-	}
-	m.pending = true
-	level := m.drill.Level
-	allowed := m.drill.Allowed()
-	gen := m.gen
+// generateCmd はレベルに合わせて1行生成するコマンドを作る。
+func generateCmd(gen *sentence.Generator, level int, allowed []string) tea.Cmd {
 	return func() tea.Msg {
+		// リトライと単語バンクへの切り替えまで含めた全体の上限
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
 		line, err := gen.Generate(ctx, allowed)
@@ -83,9 +82,20 @@ func (m *Model) generate() tea.Cmd {
 	}
 }
 
+// generate は現在のレベルの生成コマンドを返す。
+// すでにリクエストが飛んでいれば何もしない。
+func (m *Model) generate() tea.Cmd {
+	if m.pending {
+		return nil
+	}
+	m.pending = true
+	return generateCmd(m.gen, m.drill.Level, m.drill.Allowed())
+}
+
 // Init は最初の例文生成と定期処理を開始する。
+// New で pending を立ててあるので、ここでは guard なしでコマンドだけ返す。
 func (m Model) Init() tea.Cmd {
-	return tea.Batch((&m).generate(), m.tick())
+	return tea.Batch(generateCmd(m.gen, m.drill.Level, m.drill.Allowed()), m.tick())
 }
 
 // Update はイベントを処理する。
@@ -98,7 +108,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
-			m.save()
+			// 終了時の保存は main 側が同期的に行う
 			return m, tea.Quit
 		case tea.KeyRunes:
 			if m.state != stateTyping {
@@ -135,6 +145,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(m.tick(), cmd)
 
+	case saveErrMsg:
+		m.message = "保存に失敗: " + msg.err.Error()
+		return m, nil
+
 	case lineMsg:
 		m.pending = false
 		if msg.err != nil {
@@ -160,6 +174,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) startLine(line sentence.Line) {
+	m.engine.Reset() // 前の行の打ちかけを持ち越さない
 	m.line = line
 	m.drill.StartLine(line.Units)
 	m.state = stateTyping
@@ -177,27 +192,42 @@ func (m *Model) handleEmissions(ems []naginata.Emission, now time.Time) tea.Cmd 
 		case drill.ResultLineDone:
 			out := m.drill.FinishLine(now, m.engine.Presses())
 			m.message = outcomeMessage(out, m.drill.Cfg.TargetKPM)
-			m.save()
+			saveCmd := m.save()
 			// 先読みした行がレベルと合っていればすぐ次を始める
 			if m.next != nil && m.next.level == m.drill.Level {
 				line := m.next.line
 				m.next = nil
 				m.startLine(line)
-				return m.generate()
+				return tea.Batch(saveCmd, m.generate())
 			}
 			m.next = nil
 			m.state = stateLoading
-			return m.generate()
+			m.loadingSince = now
+			return tea.Batch(saveCmd, m.generate())
 		}
 	}
 	return nil
 }
 
-func (m *Model) save() {
+// save は進捗の書き込みコマンドを返す。
+// Stats はイベントループ内で更新されるため、直列化だけ同期で行い、
+// ファイルI/Oは裏に逃がしてループを止めない。
+func (m *Model) save() tea.Cmd {
 	if m.statePath == "" {
-		return
+		return nil
 	}
-	_ = store.Save(m.statePath, store.State{Level: m.drill.Level, Stats: m.drill.Stats})
+	data, err := store.Encode(store.State{Level: m.drill.Level, Stats: m.drill.Stats})
+	if err != nil {
+		m.message = "保存に失敗: " + err.Error()
+		return nil
+	}
+	path := m.statePath
+	return func() tea.Msg {
+		if err := store.Write(path, data); err != nil {
+			return saveErrMsg{err: err}
+		}
+		return nil
+	}
 }
 
 // Err は終了原因のエラーを返す。

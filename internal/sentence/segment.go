@@ -7,20 +7,32 @@ import "strings"
 // Segment は text を allowed の単位（拗音は2文字で1単位）に分割する。
 // 最長一致で分割し、分割できない文字があれば ok=false を返す。
 func Segment(text string, allowed []string) (units []string, ok bool) {
-	set := make(map[string]bool, len(allowed))
-	maxLen := 0
+	return newUnitSet(allowed).segment(text)
+}
+
+// unitSet は同じ allowed で繰り返し分割するときにマップを使い回す。
+type unitSet struct {
+	set    map[string]bool
+	maxLen int
+}
+
+func newUnitSet(allowed []string) unitSet {
+	s := unitSet{set: make(map[string]bool, len(allowed))}
 	for _, u := range allowed {
-		set[u] = true
-		if n := len([]rune(u)); n > maxLen {
-			maxLen = n
+		s.set[u] = true
+		if n := len([]rune(u)); n > s.maxLen {
+			s.maxLen = n
 		}
 	}
+	return s
+}
 
+func (s unitSet) segment(text string) (units []string, ok bool) {
 	runes := []rune(text)
 	for i := 0; i < len(runes); {
 		matched := false
-		for n := min(maxLen, len(runes)-i); n > 0; n-- {
-			if set[string(runes[i:i+n])] {
+		for n := min(s.maxLen, len(runes)-i); n > 0; n-- {
+			if s.set[string(runes[i:i+n])] {
 				units = append(units, string(runes[i:i+n]))
 				i += n
 				matched = true

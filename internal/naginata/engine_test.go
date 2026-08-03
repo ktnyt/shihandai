@@ -113,6 +113,26 @@ func TestEngineRolloverAcrossChord(t *testing.T) {
 	}
 }
 
+func TestEngineResetDropsPendingKeys(t *testing.T) {
+	// 行末に打ちかけのキーが残っても、Reset 後の入力に混ざらない
+	e := NewEngine(80 * time.Millisecond)
+	start := time.Unix(0, 0)
+
+	e.Press(KeyF, start) // 「か」になる前の未確定キー
+	e.Reset()
+
+	var got []string
+	for _, em := range e.Press(KeyJ, start.Add(10*time.Millisecond)) {
+		got = append(got, em.Text)
+	}
+	got = append(got, flushAfterWindow(e, start.Add(10*time.Millisecond))...)
+
+	// F が残っていたら「が」になってしまう
+	if len(got) != 1 || got[0] != "あ" {
+		t.Fatalf("確定列 = %q, want [あ]", got)
+	}
+}
+
 func TestEnginePressesCount(t *testing.T) {
 	e := NewEngine(80 * time.Millisecond)
 	start := time.Unix(0, 0)

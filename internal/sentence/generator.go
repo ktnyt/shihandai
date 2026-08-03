@@ -5,12 +5,22 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"time"
+)
+
+// Source は例文の出どころ。
+type Source string
+
+const (
+	SourceLLM      Source = "llm"
+	SourceWordbank Source = "wordbank"
 )
 
 // Line は練習1行分の例文。
 type Line struct {
-	Units  []string // 打鍵単位に分割済みの本文
-	Source string   // "llm" または "wordbank"
+	Units    []string // 打鍵単位に分割済みの本文
+	Source   Source
+	LLMError string // LLMを使えなかった理由。空なら問題なし
 }
 
 // Text は本文を返す。
@@ -44,30 +54,52 @@ type Generator struct {
 // Generate は allowed のかなだけで打てる例文を1行生成する。
 // LLMの出力が検証を通らなければ再試行し、だめなら単語バンクから組み立てる。
 func (g *Generator) Generate(ctx context.Context, allowed []string) (Line, error) {
+	g.init()
+	llmErr := ""
 	if g.LLM != nil {
 		hints := g.hintWords(allowed, 12)
 		for range max(g.Cfg.Retries, 1) {
-			if ctx.Err() != nil {
+			if err := ctx.Err(); err != nil {
+				llmErr = err.Error()
 				break
 			}
 			text, err := g.LLM.Generate(ctx, allowed, hints)
 			if err != nil {
-				break // 接続エラー等はフォールバックに切り替える
+				// 接続エラー等はフォールバックに切り替えるが、理由は残す
+				llmErr = err.Error()
+				break
 			}
 			units, ok := Segment(Normalize(text), allowed)
 			if ok && len(units) >= g.Cfg.MinUnits && len(units) <= g.Cfg.MaxUnits {
-				return Line{Units: units, Source: "llm"}, nil
+				return Line{Units: units, Source: SourceLLM}, nil
 			}
+			llmErr = "生成が検証を通らなかった"
 		}
 	}
-	return g.fromWordbank(allowed)
+	line, err := g.fromWordbank(allowed)
+	line.LLMError = llmErr
+	return line, err
+}
+
+// init は未設定のフィールドに既定値を入れる。
+func (g *Generator) init() {
+	if g.Cfg.MaxUnits <= 0 || g.Cfg.MaxUnits < g.Cfg.MinUnits {
+		g.Cfg = DefaultConfig()
+	}
+	if g.Cfg.MinUnits < 1 {
+		g.Cfg.MinUnits = 1
+	}
+	if g.Rand == nil {
+		g.Rand = rand.New(rand.NewSource(time.Now().UnixNano()))
+	}
 }
 
 // hintWords は allowed だけで打てる単語を最大 n 個選ぶ。
 func (g *Generator) hintWords(allowed []string, n int) []string {
+	set := newUnitSet(allowed)
 	var words []string
 	for _, w := range wordbank {
-		if _, ok := Segment(w, allowed); ok {
+		if _, ok := set.segment(w); ok {
 			words = append(words, w)
 		}
 	}
@@ -77,10 +109,11 @@ func (g *Generator) hintWords(allowed []string, n int) []string {
 
 // fromWordbank は単語バンクから打てる語を選んでつなげる。
 func (g *Generator) fromWordbank(allowed []string) (Line, error) {
+	set := newUnitSet(allowed)
 	type entry struct{ units []string }
 	var candidates []entry
 	for _, w := range wordbank {
-		if units, ok := Segment(w, allowed); ok {
+		if units, ok := set.segment(w); ok {
 			candidates = append(candidates, entry{units})
 		}
 	}
@@ -101,5 +134,5 @@ func (g *Generator) fromWordbank(allowed []string) (Line, error) {
 		}
 		units = append(units, w.units...)
 	}
-	return Line{Units: units, Source: "wordbank"}, nil
+	return Line{Units: units, Source: SourceWordbank}, nil
 }

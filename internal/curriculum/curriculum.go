@@ -69,6 +69,7 @@ var Groups = []Group{
 		Units: []string{
 			"ゔ", "ふぁ", "ふぃ", "ふぇ", "ふぉ", "てぃ", "でぃ", "うぃ", "うぇ", "うぉ",
 			"しぇ", "ちぇ", "じぇ", "とぅ", "どぅ", "てゅ", "でゅ", "ふゅ", "つぁ",
+			"ゔぁ", "ゔぃ", "ゔぇ", "ゔぉ",
 		},
 	},
 }
@@ -95,7 +96,9 @@ func For(level int) []string {
 	if level > MaxLevel() {
 		level = MaxLevel()
 	}
-	return flattened[:initialCount+level-1]
+	// 呼び出し側の append がパッケージ変数を壊さないよう容量も切り詰める
+	n := initialCount + level - 1
+	return flattened[:n:n]
 }
 
 // GroupOf はかなが属するグループ名を返す。

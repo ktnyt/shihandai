@@ -4,8 +4,7 @@ import "time"
 
 // Emission はエンジンが確定した1文字（または拗音などの1単位）を表す。
 type Emission struct {
-	Text  string
-	Chord KeySet
+	Text string
 }
 
 // Engine はキー押下の列から薙刀式のかなを確定する。
@@ -13,6 +12,8 @@ type Emission struct {
 // 端末入力ではキーリリースを検出できないため、QMKの「リリースで確定」の
 // 代わりにタイミングウィンドウを使う。ウィンドウ内に押されたキーを
 // 同時押しとみなし、QMKと同じ最長一致の貪欲法で確定する。
+//
+// 並行安全ではない。単一のイベントループから呼ぶこと。
 type Engine struct {
 	window   time.Duration
 	buf      []Key
@@ -29,8 +30,11 @@ func NewEngine(window time.Duration) *Engine {
 // Presses は起動からの総打鍵数を返す。
 func (e *Engine) Presses() int { return e.presses }
 
-// Pending は未確定のキーがあるかを返す。
-func (e *Engine) Pending() bool { return len(e.buf) > 0 }
+// Reset は未確定のキーを捨てる。行の切り替え時に呼ぶ。
+func (e *Engine) Reset() {
+	e.buf = nil
+	e.armed = false
+}
 
 // Press はキー押下を処理し、確定したかなを返す。
 func (e *Engine) Press(k Key, now time.Time) []Emission {
@@ -106,7 +110,7 @@ func (e *Engine) typeOnce() []Emission {
 		for _, entry := range Table {
 			if entry.Keys == comb {
 				e.buf = e.buf[nt:]
-				return []Emission{{Text: entry.Text, Chord: comb}}
+				return []Emission{{Text: entry.Text}}
 			}
 		}
 	}

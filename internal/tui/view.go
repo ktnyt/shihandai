@@ -1,8 +1,9 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/ktnyt/shihandai/internal/curriculum"
 	"github.com/ktnyt/shihandai/internal/drill"
 	"github.com/ktnyt/shihandai/internal/naginata"
+	"github.com/ktnyt/shihandai/internal/sentence"
 )
 
 var (
@@ -45,7 +47,8 @@ func (m Model) View() string {
 		wrapKana(allowed, max(m.width-8, 40)))
 
 	if m.state == stateLoading {
-		b.WriteString(styleFaint.Render("例文を生成中…") + "\n")
+		elapsed := time.Since(m.loadingSince).Round(time.Second)
+		b.WriteString(styleFaint.Render(fmt.Sprintf("例文を生成中… (%s)", elapsed)) + "\n")
 		return b.String()
 	}
 
@@ -78,6 +81,9 @@ func (m Model) View() string {
 	kpm := m.drill.KPM(time.Now(), m.engine.Presses())
 	fmt.Fprintf(&b, "\n  kpm %5.0f / %.0f   ミス %d   例文: %s\n",
 		kpm, m.drill.Cfg.TargetKPM, m.drill.LineErrors(), sourceLabel(m.line.Source, m.llmName))
+	if m.line.LLMError != "" {
+		b.WriteString("  " + styleFaint.Render("LLMを使えなかった: "+m.line.LLMError) + "\n")
+	}
 
 	if m.flash != "" {
 		b.WriteString("  " + styleError.Render(m.flash) + "\n")
@@ -108,7 +114,13 @@ func (m Model) weakUnits(n int) string {
 			items = append(items, item{u, acc})
 		}
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].acc < items[j].acc })
+	// 同率のときに表示がちらつかないよう、かなを第2キーにして安定に並べる
+	slices.SortStableFunc(items, func(a, b item) int {
+		if c := cmp.Compare(a.acc, b.acc); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.unit, b.unit)
+	})
 	var parts []string
 	for i, it := range items {
 		if i >= n {
@@ -134,11 +146,11 @@ func wrapKana(units []string, width int) string {
 	return joined
 }
 
-func sourceLabel(source, llmName string) string {
+func sourceLabel(source sentence.Source, llmName string) string {
 	switch source {
-	case "llm":
+	case sentence.SourceLLM:
 		return llmName
-	case "wordbank":
+	case sentence.SourceWordbank:
 		return "単語バンク"
 	}
 	return "-"

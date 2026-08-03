@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -81,8 +82,12 @@ func (o *Ollama) Generate(ctx context.Context, allowed, hints []string) (string,
 	if err != nil {
 		return "", fmt.Errorf("ollama への接続に失敗: %w", err)
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp.Body)
 
+	if resp.StatusCode != http.StatusOK {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 200))
+		return "", fmt.Errorf("ollama が HTTP %d を返した: %s", resp.StatusCode, snippet)
+	}
 	var parsed chatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
 		return "", fmt.Errorf("ollama の応答の解析に失敗: %w", err)
@@ -91,6 +96,12 @@ func (o *Ollama) Generate(ctx context.Context, allowed, hints []string) (string,
 		return "", fmt.Errorf("ollama がエラーを返した: %s", parsed.Error)
 	}
 	return parsed.Message.Content, nil
+}
+
+// drainAndClose は接続を再利用できるようボディを読み切って閉じる。
+func drainAndClose(body io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, 1<<20))
+	_ = body.Close()
 }
 
 // Available はモデルが利用できるかを確かめる。
@@ -108,7 +119,7 @@ func (o *Ollama) Available(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("ollama への接続に失敗: %w", err)
 	}
-	defer resp.Body.Close()
+	defer drainAndClose(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("モデル %q が見つからない (ollama pull %s を実行してください)", o.Model, o.Model)
 	}

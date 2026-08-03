@@ -159,8 +159,9 @@ func (d *Drill) Input(text string) Result {
 }
 
 func (d *Drill) stat(unit string) *UnitStat {
-	s, ok := d.Stats[unit]
-	if !ok {
+	// 手で編集された進捗ファイル由来の nil 値にも耐える
+	s := d.Stats[unit]
+	if s == nil {
 		s = &UnitStat{}
 		d.Stats[unit] = s
 	}
@@ -196,8 +197,8 @@ func (d *Drill) FinishLine(now time.Time, keys int) Outcome {
 	// 正答率が下がったかなが出たら1つ降格する
 	if d.Level > 1 {
 		for _, unit := range d.Allowed() {
-			s, ok := d.Stats[unit]
-			if !ok || len(s.Recent) < d.Cfg.MinAttempts {
+			s := d.Stats[unit]
+			if s == nil || len(s.Recent) < d.Cfg.MinAttempts {
 				continue
 			}
 			if s.RecentAccuracy() < d.Cfg.DemoteAccuracy {

@@ -2,7 +2,10 @@
 // かな定義は eswai/qmk_firmware users/naginata_v15 に準拠する。
 package naginata
 
-import "strings"
+import (
+	"math/bits"
+	"strings"
+)
 
 // Key は薙刀式で使う物理キー（QWERTY配列上の位置）を表す。
 type Key uint8
@@ -143,14 +146,7 @@ func Set(keys ...Key) KeySet {
 func (s KeySet) Has(k Key) bool { return s&(1<<k) != 0 }
 
 // Count は含まれるキーの数を返す。
-func (s KeySet) Count() int {
-	c := 0
-	for s > 0 {
-		c += int(s & 1)
-		s >>= 1
-	}
-	return c
-}
+func (s KeySet) Count() int { return bits.OnesCount32(uint32(s)) }
 
 // Keys は含まれるキーを列挙する。
 func (s KeySet) Keys() []Key {
