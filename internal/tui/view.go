@@ -44,20 +44,15 @@ func (m Model) View() string {
 		styleFaint.Render("使えるかな:"),
 		wrapKana(allowed, max(m.width-8, 40)))
 
-	if m.paused {
-		b.WriteString("  " + styleNotice.Render("一時停止中") + "\n")
-		b.WriteString("  " + styleFaint.Render("Space で再開 (同じ単語を最初から)、Esc で終了") + "\n")
-		if successes, total := m.drill.SuccessCount(); total > 0 {
-			fmt.Fprintf(&b, "\n  %s\n",
-				styleFaint.Render(fmt.Sprintf("直近 %d/%d 語 成功", successes, total)))
-		}
-		return b.String()
-	}
-
-	// 出題中の単語（入力済み、現在位置、残りで塗り分け）
+	// 出題中の単語（入力済み、現在位置、残りで塗り分け）。
+	// 一時停止中はレイアウトを保ったまま伏せ字にする
 	pos := m.drill.Pos()
 	var wordView strings.Builder
 	for i, u := range m.drill.Word() {
+		if m.paused {
+			wordView.WriteString(styleFaint.Render(mask(u)))
+			continue
+		}
 		switch {
 		case i < pos:
 			wordView.WriteString(styleDone.Render(u))
@@ -69,21 +64,33 @@ func (m Model) View() string {
 	}
 	b.WriteString("  " + wordView.String() + "\n\n")
 
-	// 次に打つかなの運指ヒント
-	if expected := m.drill.Expected(); expected != "" {
-		if chord, ok := naginata.ChordFor(expected); ok {
-			fmt.Fprintf(&b, "  つぎ: %s %s\n",
-				styleCurrent.Render(expected),
-				styleHint.Render("["+chord.Label()+"]"))
+	// 次に打つかなの運指ヒント。一時停止中は代わりに案内を出す
+	switch {
+	case m.paused:
+		fmt.Fprintf(&b, "  %s %s\n",
+			styleNotice.Render("一時停止中"),
+			styleFaint.Render("(Space で同じ単語を最初から、Esc で終了)"))
+	default:
+		if expected := m.drill.Expected(); expected != "" {
+			if chord, ok := naginata.ChordFor(expected); ok {
+				fmt.Fprintf(&b, "  つぎ: %s %s\n",
+					styleCurrent.Render(expected),
+					styleHint.Render("["+chord.Label()+"]"))
+			}
 		}
 	}
 
 	// 時間と成功率
-	elapsed := m.drill.Elapsed(time.Now())
 	threshold := m.drill.Threshold()
-	timer := fmt.Sprintf("%.1fs / %.1fs", elapsed.Seconds(), threshold.Seconds())
-	if elapsed > threshold {
-		timer = styleError.Render(timer)
+	var timer string
+	if m.paused {
+		timer = fmt.Sprintf("--.-s / %.1fs", threshold.Seconds())
+	} else {
+		elapsed := m.drill.Elapsed(time.Now())
+		timer = fmt.Sprintf("%5.1fs / %.1fs", elapsed.Seconds(), threshold.Seconds())
+		if elapsed > threshold {
+			timer = styleError.Render(timer)
+		}
 	}
 	fmt.Fprintf(&b, "\n  %s   ミス %d\n", timer, m.drill.WordErrors())
 
@@ -160,6 +167,15 @@ func wrapKana(units []string, width int) string {
 		}
 	}
 	return joined
+}
+
+// mask はかなを同じ表示幅の伏せ字にする。
+func mask(unit string) string {
+	var b strings.Builder
+	for range []rune(unit) {
+		b.WriteRune('●')
+	}
+	return b.String()
 }
 
 func printable(text string) string {

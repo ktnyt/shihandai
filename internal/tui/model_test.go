@@ -158,6 +158,7 @@ func TestPromoteAfterWindowFilledWithSuccess(t *testing.T) {
 func TestEscPausesAndHidesWord(t *testing.T) {
 	m := newTestModel(t)
 	word := strings.Join(m.drill.Word(), "")
+	before := m.View()
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = next.(Model)
@@ -169,12 +170,24 @@ func TestEscPausesAndHidesWord(t *testing.T) {
 	if !strings.Contains(view, "一時停止中") {
 		t.Errorf("一時停止の表示がない:\n%s", view)
 	}
-	// 単語も運指ヒントも隠れる
+	// 単語と運指ヒントは隠れ、伏せ字が出る
 	if strings.Contains(view, "つぎ") {
 		t.Errorf("一時停止中に運指ヒントが見えている:\n%s", view)
 	}
 	if len(word) > 1 && strings.Contains(view, word) {
 		t.Errorf("一時停止中に単語 %q が見えている:\n%s", word, view)
+	}
+	if !strings.Contains(view, "●") {
+		t.Errorf("伏せ字が出ていない:\n%s", view)
+	}
+	// 統計は見えたまま、行数も変わらない（レイアウトがずれない）
+	for _, want := range []string{"成功率", "レベルアップ", "ミス"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("一時停止中に %q が消えている:\n%s", want, view)
+		}
+	}
+	if got, want := strings.Count(view, "\n"), strings.Count(before, "\n"); got != want {
+		t.Errorf("一時停止で行数が変わった: %d → %d\n通常:\n%s\n停止中:\n%s", want, got, before, view)
 	}
 }
 
