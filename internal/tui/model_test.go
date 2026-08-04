@@ -2,6 +2,7 @@ package tui
 
 import (
 	"math/rand"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -154,10 +155,90 @@ func TestPromoteAfterWindowFilledWithSuccess(t *testing.T) {
 	}
 }
 
-func TestQuitOnEsc(t *testing.T) {
+func TestEscPausesAndHidesWord(t *testing.T) {
 	m := newTestModel(t)
+	word := strings.Join(m.drill.Word(), "")
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	if cmd != nil {
+		t.Fatal("1回目の Esc で終了してはいけない")
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "一時停止中") {
+		t.Errorf("一時停止の表示がない:\n%s", view)
+	}
+	// 単語も運指ヒントも隠れる
+	if strings.Contains(view, "つぎ") {
+		t.Errorf("一時停止中に運指ヒントが見えている:\n%s", view)
+	}
+	if len(word) > 1 && strings.Contains(view, word) {
+		t.Errorf("一時停止中に単語 %q が見えている:\n%s", word, view)
+	}
+}
+
+func TestKeysIgnoredWhilePaused(t *testing.T) {
+	m := newTestModel(t)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+
+	m = pressChord(m, naginata.Set(naginata.KeyJ))
+	if m.drill.Pos() != 0 || m.drill.WordErrors() != 0 {
+		t.Fatalf("一時停止中の打鍵が判定された: pos=%d errors=%d",
+			m.drill.Pos(), m.drill.WordErrors())
+	}
+}
+
+func TestSpaceResumesSameWordWithFreshTimer(t *testing.T) {
+	m := newTestModel(t)
+	word := m.drill.Word()
+
+	// 1文字打ってから一時停止し、しばらく経ってから再開する
+	chord, _ := naginata.ChordFor(word[0])
+	m = pressChord(m, chord)
+	if m.drill.Pos() != 1 {
+		t.Fatalf("前提が崩れた: pos=%d", m.drill.Pos())
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	m = next.(Model)
+
+	if m.paused {
+		t.Fatal("Space で再開していない")
+	}
+	if !slices.Equal(m.drill.Word(), word) {
+		t.Errorf("再開後の単語が変わった: %v → %v", word, m.drill.Word())
+	}
+	if m.drill.Pos() != 0 {
+		t.Errorf("再開後は最初から打ち直すべき: pos=%d", m.drill.Pos())
+	}
+	if e := m.drill.Elapsed(time.Now()); e > time.Second {
+		t.Errorf("再開時に計測がやり直されていない: elapsed=%v", e)
+	}
+	// 再開後は普通に打てる
+	m = typeWord(t, m)
+	if _, total := m.drill.SuccessCount(); total != 1 {
+		t.Errorf("再開後の単語が判定されていない")
+	}
+}
+
+func TestEscTwiceQuits(t *testing.T) {
+	m := newTestModel(t)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if cmd == nil {
-		t.Fatal("Esc で終了コマンドが返らない")
+		t.Fatal("一時停止中の Esc で終了コマンドが返らない")
+	}
+}
+
+func TestCtrlCQuitsImmediately(t *testing.T) {
+	m := newTestModel(t)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("Ctrl+C で終了コマンドが返らない")
 	}
 }

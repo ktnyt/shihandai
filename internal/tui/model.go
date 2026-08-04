@@ -23,6 +23,7 @@ type Model struct {
 
 	statePath string
 
+	paused  bool
 	width   int
 	message string
 	flash   string
@@ -63,10 +64,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch msg.Type {
-		case tea.KeyCtrlC, tea.KeyEsc:
+		case tea.KeyCtrlC:
 			// 終了時の保存は main 側が同期的に行う
 			return m, tea.Quit
+		case tea.KeyEsc:
+			if m.paused {
+				return m, tea.Quit
+			}
+			// 単語を隠して計測を止める。打ちかけのキーは捨てる
+			m.paused = true
+			m.engine.Reset()
+			m.flash = ""
+			return m, nil
+		case tea.KeySpace:
+			if m.paused {
+				m.resume(time.Now())
+				return m, nil
+			}
+			return m, m.press(naginata.KeySpace, time.Now())
 		case tea.KeyRunes:
+			if m.paused {
+				return m, nil
+			}
 			now := time.Now()
 			var cmds []tea.Cmd
 			for _, r := range msg.Runes {
@@ -77,13 +96,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, tea.Batch(cmds...)
-		case tea.KeySpace:
-			return m, m.press(naginata.KeySpace, time.Now())
 		}
 		return m, nil
 
 	case tickMsg:
 		now := time.Time(msg)
+		if m.paused {
+			return m, m.tick()
+		}
 		return m, tea.Batch(m.tick(), m.handleEmissions(m.engine.Flush(now), now))
 
 	case saveErrMsg:
@@ -95,6 +115,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) press(key naginata.Key, now time.Time) tea.Cmd {
 	return m.handleEmissions(m.engine.Press(key, now), now)
+}
+
+// resume は一時停止を解除する。隠していた間に読み直しが必要なので、
+// 同じ単語を最初から出題し直し、計測もやり直す。
+func (m *Model) resume(now time.Time) {
+	m.paused = false
+	m.engine.Reset()
+	m.drill.StartWord(m.drill.Word(), now)
+	m.flash = ""
 }
 
 // handleEmissions は確定したかなを判定に流す。単語が終わったら次を出題する。

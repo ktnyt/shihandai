@@ -36,13 +36,23 @@ func (m Model) View() string {
 
 	fmt.Fprintf(&b, "%s  %s\n",
 		styleTitle.Render("shihandai — 薙刀式タイピング練習"),
-		styleFaint.Render("(Esc で終了)"))
+		styleFaint.Render("(Esc で一時停止)"))
 	fmt.Fprintf(&b, "レベル %d/%d  かな %d文字  いまの段階: %s\n\n",
 		m.drill.Level, curriculum.MaxLevel(), len(allowed), curriculum.GroupOf(newest))
 
 	fmt.Fprintf(&b, "%s %s\n\n",
 		styleFaint.Render("使えるかな:"),
 		wrapKana(allowed, max(m.width-8, 40)))
+
+	if m.paused {
+		b.WriteString("  " + styleNotice.Render("一時停止中") + "\n")
+		b.WriteString("  " + styleFaint.Render("Space で再開 (同じ単語を最初から)、Esc で終了") + "\n")
+		if successes, total := m.drill.SuccessCount(); total > 0 {
+			fmt.Fprintf(&b, "\n  %s\n",
+				styleFaint.Render(fmt.Sprintf("直近 %d/%d 語 成功", successes, total)))
+		}
+		return b.String()
+	}
 
 	// 出題中の単語（入力済み、現在位置、残りで塗り分け）
 	pos := m.drill.Pos()
