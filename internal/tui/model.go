@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -22,14 +23,13 @@ type Model struct {
 
 	statePath string
 
-	line    lesson.Line
 	width   int
 	message string
 	flash   string
 	err     error
 }
 
-// New は画面を作り、最初の行を用意する。
+// New は画面を作り、最初の単語を出題する。
 func New(engine *naginata.Engine, d *drill.Drill, gen *lesson.Generator, statePath string) (Model, error) {
 	m := Model{
 		engine:    engine,
@@ -37,7 +37,7 @@ func New(engine *naginata.Engine, d *drill.Drill, gen *lesson.Generator, statePa
 		gen:       gen,
 		statePath: statePath,
 	}
-	if err := m.newLine(); err != nil {
+	if err := m.newWord(time.Now()); err != nil {
 		return Model{}, err
 	}
 	return m, nil
@@ -94,12 +94,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) press(key naginata.Key, now time.Time) tea.Cmd {
-	ems := m.engine.Press(key, now)
-	m.drill.MarkKeydown(now, m.engine.Presses())
-	return m.handleEmissions(ems, now)
+	return m.handleEmissions(m.engine.Press(key, now), now)
 }
 
-// handleEmissions は確定したかなを判定に流す。行が終わったら次の行を作る。
+// handleEmissions は確定したかなを判定に流す。単語が終わったら次を出題する。
 func (m *Model) handleEmissions(ems []naginata.Emission, now time.Time) tea.Cmd {
 	for _, em := range ems {
 		switch m.drill.Input(em.Text) {
@@ -107,11 +105,11 @@ func (m *Model) handleEmissions(ems []naginata.Emission, now time.Time) tea.Cmd 
 			m.flash = ""
 		case drill.ResultError:
 			m.flash = "ミス: " + printable(em.Text)
-		case drill.ResultLineDone:
-			out := m.drill.FinishLine(now, m.engine.Presses())
-			m.message = outcomeMessage(out, m.drill.Cfg.TargetKPM)
+		case drill.ResultWordDone:
+			out := m.drill.FinishWord(now)
+			m.message = resultMessage(out)
 			saveCmd := m.save()
-			if err := m.newLine(); err != nil {
+			if err := m.newWord(now); err != nil {
 				m.err = err
 				return tea.Quit
 			}
@@ -121,15 +119,14 @@ func (m *Model) handleEmissions(ems []naginata.Emission, now time.Time) tea.Cmd 
 	return nil
 }
 
-// newLine は現在のレベルに合った行を辞書から組み立てる。
-func (m *Model) newLine() error {
-	line, err := m.gen.Generate(m.drill.Allowed(), m.focusUnits())
+// newWord は現在のレベルに合った単語を辞書から選んで出題する。
+func (m *Model) newWord(now time.Time) error {
+	word, err := m.gen.Word(m.drill.Allowed(), m.focusUnits())
 	if err != nil {
 		return err
 	}
-	m.engine.Reset() // 前の行の打ちかけを持ち越さない
-	m.line = line
-	m.drill.StartLine(line.Units())
+	m.engine.Reset() // 前の単語の打ちかけを持ち越さない
+	m.drill.StartWord(word, now)
 	m.flash = ""
 	return nil
 }
@@ -142,6 +139,22 @@ func (m *Model) focusUnits() []string {
 		focus = append(focus, w.unit)
 	}
 	return focus
+}
+
+// resultMessage は単語1つの結果を1行にまとめる。
+func resultMessage(out drill.WordResult) string {
+	switch {
+	case out.Demoted:
+		return fmt.Sprintf("「%s」の正答率が下がったのでレベルダウン", out.WeakUnit)
+	case out.Promoted:
+		return "成功率が基準を超えた! 新しいかなを追加"
+	case out.Success:
+		return fmt.Sprintf("成功 %.1fs / %.1fs", out.Duration.Seconds(), out.Threshold.Seconds())
+	case out.Errors > 0:
+		return fmt.Sprintf("失敗 (ミス %d)", out.Errors)
+	default:
+		return fmt.Sprintf("失敗 (時間超過 %.1fs > %.1fs)", out.Duration.Seconds(), out.Threshold.Seconds())
+	}
 }
 
 // save は進捗の書き込みコマンドを返す。

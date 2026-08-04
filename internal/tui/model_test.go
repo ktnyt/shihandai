@@ -41,48 +41,72 @@ func pressChord(m Model, chord naginata.KeySet) Model {
 	return next.(Model)
 }
 
-func TestNewStartsWithTypableLine(t *testing.T) {
-	m := newTestModel(t)
-	line := m.drill.Line()
-	if len(line) == 0 {
-		t.Fatal("最初の行が空")
-	}
-	allowed := m.drill.Allowed()
-	for _, u := range line {
-		if _, ok := lesson.Segment(u, allowed); !ok {
-			t.Errorf("使えないかな %q が行に含まれる", u)
-		}
-	}
-
-	view := m.View()
-	for _, want := range []string{"使えるかな", "つぎ", "kpm"} {
-		if !strings.Contains(view, want) {
-			t.Errorf("表示に %q がない:\n%s", want, view)
-		}
-	}
-}
-
-func TestTypingWholeLinePromotesAndStartsNext(t *testing.T) {
-	m := newTestModel(t)
-	line := m.drill.Line()
-
-	// 生成された行を正しい打鍵でノーミス高速で打ち切る
-	for _, u := range line {
+// typeWord は現在の単語を正しい打鍵で打ち切る。
+func typeWord(t *testing.T, m Model) Model {
+	t.Helper()
+	for _, u := range m.drill.Word() {
 		chord, ok := naginata.ChordFor(u)
 		if !ok {
 			t.Fatalf("%q の打鍵が見つからない", u)
 		}
 		m = pressChord(m, chord)
 	}
+	return m
+}
 
-	if m.drill.Level != 2 {
-		t.Fatalf("Level = %d, want 2 (ノーミス高速で昇格するはず)", m.drill.Level)
+func TestNewStartsWithTypableWord(t *testing.T) {
+	m := newTestModel(t)
+	word := m.drill.Word()
+	if len(word) == 0 {
+		t.Fatal("最初の単語が空")
 	}
-	if len(m.drill.Line()) == 0 || m.drill.Pos() != 0 {
-		t.Fatalf("次の行が始まっていない: line=%v pos=%d", m.drill.Line(), m.drill.Pos())
+	allowed := m.drill.Allowed()
+	for _, u := range word {
+		if _, ok := lesson.Segment(u, allowed); !ok {
+			t.Errorf("使えないかな %q が単語に含まれる", u)
+		}
 	}
-	if !strings.Contains(m.View(), "新しいかなを追加") {
-		t.Errorf("昇格メッセージが出ていない:\n%s", m.View())
+
+	view := m.View()
+	for _, want := range []string{"使えるかな", "つぎ", "成功率", "レベルアップ"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("表示に %q がない:\n%s", want, view)
+		}
+	}
+}
+
+func TestTypingWordRecordsSuccessAndStartsNext(t *testing.T) {
+	m := newTestModel(t)
+	first := strings.Join(m.drill.Word(), "")
+
+	m = typeWord(t, m)
+
+	successes, total := m.drill.SuccessCount()
+	if successes != 1 || total != 1 {
+		t.Fatalf("SuccessCount = %d/%d, want 1/1", successes, total)
+	}
+	if len(m.drill.Word()) == 0 || m.drill.Pos() != 0 {
+		t.Fatalf("次の単語が始まっていない: word=%v pos=%d", m.drill.Word(), m.drill.Pos())
+	}
+	if !strings.Contains(m.View(), "成功") {
+		t.Errorf("成功メッセージが出ていない:\n%s", m.View())
+	}
+	_ = first
+}
+
+func TestSlowWordRecordsFailure(t *testing.T) {
+	m := newTestModel(t)
+
+	// しきい値を必ず超えるよう、経過時間を進めてから打ち切る
+	m.drill.StartWord(m.drill.Word(), time.Now().Add(-time.Minute))
+	m = typeWord(t, m)
+
+	successes, total := m.drill.SuccessCount()
+	if successes != 0 || total != 1 {
+		t.Fatalf("SuccessCount = %d/%d, want 0/1", successes, total)
+	}
+	if !strings.Contains(m.View(), "時間超過") {
+		t.Errorf("時間超過メッセージが出ていない:\n%s", m.View())
 	}
 }
 
@@ -97,14 +121,36 @@ func TestWrongInputFlashesError(t *testing.T) {
 	}
 	m = pressChord(m, naginata.Set(wrongKey))
 
-	if m.drill.LineErrors() != 1 {
-		t.Fatalf("LineErrors = %d, want 1", m.drill.LineErrors())
+	if m.drill.WordErrors() != 1 {
+		t.Fatalf("WordErrors = %d, want 1", m.drill.WordErrors())
 	}
 	if !strings.Contains(m.View(), "ミス") {
 		t.Errorf("ミス表示がない:\n%s", m.View())
 	}
 	if m.drill.Pos() != 0 {
 		t.Errorf("ミスで位置が進んだ: pos=%d", m.drill.Pos())
+	}
+}
+
+func TestPromoteAfterWindowFilledWithSuccess(t *testing.T) {
+	engine := naginata.NewEngine(80 * time.Millisecond)
+	cfg := drill.DefaultConfig()
+	cfg.WindowSize = 5
+	d := drill.New(cfg, 1, nil)
+	gen := lesson.NewGenerator(lesson.DefaultConfig(), rand.New(rand.NewSource(1)))
+	m, err := New(engine, d, gen, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for range cfg.WindowSize {
+		m = typeWord(t, m)
+	}
+	if m.drill.Level != 2 {
+		t.Fatalf("Level = %d, want 2 (窓が成功で埋まったら昇格)", m.drill.Level)
+	}
+	if !strings.Contains(m.View(), "新しいかなを追加") {
+		t.Errorf("昇格メッセージが出ていない:\n%s", m.View())
 	}
 }
 

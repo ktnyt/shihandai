@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ktnyt/shihandai/internal/curriculum"
-	"github.com/ktnyt/shihandai/internal/drill"
 	"github.com/ktnyt/shihandai/internal/naginata"
 )
 
@@ -45,27 +44,20 @@ func (m Model) View() string {
 		styleFaint.Render("使えるかな:"),
 		wrapKana(allowed, max(m.width-8, 40)))
 
-	// 単語列（入力済み、現在位置、残りで塗り分け、単語の間は空ける）
+	// 出題中の単語（入力済み、現在位置、残りで塗り分け）
 	pos := m.drill.Pos()
-	var lineView strings.Builder
-	idx := 0
-	for wi, word := range m.line.Words {
-		if wi > 0 {
-			lineView.WriteString(" ")
-		}
-		for _, u := range word {
-			switch {
-			case idx < pos:
-				lineView.WriteString(styleDone.Render(u))
-			case idx == pos:
-				lineView.WriteString(styleCurrent.Render(u))
-			default:
-				lineView.WriteString(styleTodo.Render(u))
-			}
-			idx++
+	var wordView strings.Builder
+	for i, u := range m.drill.Word() {
+		switch {
+		case i < pos:
+			wordView.WriteString(styleDone.Render(u))
+		case i == pos:
+			wordView.WriteString(styleCurrent.Render(u))
+		default:
+			wordView.WriteString(styleTodo.Render(u))
 		}
 	}
-	b.WriteString("  " + lineView.String() + "\n\n")
+	b.WriteString("  " + wordView.String() + "\n\n")
 
 	// 次に打つかなの運指ヒント
 	if expected := m.drill.Expected(); expected != "" {
@@ -76,10 +68,23 @@ func (m Model) View() string {
 		}
 	}
 
-	// ステータス行
-	kpm := m.drill.KPM(time.Now(), m.engine.Presses())
-	fmt.Fprintf(&b, "\n  kpm %5.0f / %.0f   ミス %d\n",
-		kpm, m.drill.Cfg.TargetKPM, m.drill.LineErrors())
+	// 時間と成功率
+	elapsed := m.drill.Elapsed(time.Now())
+	threshold := m.drill.Threshold()
+	timer := fmt.Sprintf("%.1fs / %.1fs", elapsed.Seconds(), threshold.Seconds())
+	if elapsed > threshold {
+		timer = styleError.Render(timer)
+	}
+	fmt.Fprintf(&b, "\n  %s   ミス %d\n", timer, m.drill.WordErrors())
+
+	successes, total := m.drill.SuccessCount()
+	rate := "-"
+	if total > 0 {
+		rate = fmt.Sprintf("%.0f%%", float64(successes)/float64(total)*100)
+	}
+	fmt.Fprintf(&b, "  直近 %d/%d 語 成功率 %s  (%d 語で %.0f%% を超えたらレベルアップ)\n",
+		successes, total, rate,
+		m.drill.Cfg.WindowSize, m.drill.Cfg.PromoteRate*100)
 
 	if m.flash != "" {
 		b.WriteString("  " + styleError.Render(m.flash) + "\n")
@@ -145,19 +150,6 @@ func wrapKana(units []string, width int) string {
 		}
 	}
 	return joined
-}
-
-func outcomeMessage(out drill.Outcome, targetKPM float64) string {
-	switch {
-	case out.Demoted:
-		return fmt.Sprintf("「%s」の正答率が下がったのでレベルダウン (kpm %.0f)", out.WeakUnit, out.KPM)
-	case out.Promoted:
-		return fmt.Sprintf("ノーミス kpm %.0f! 新しいかなを追加", out.KPM)
-	case out.Errors == 0:
-		return fmt.Sprintf("ノーミス kpm %.0f (昇格には %.0f 必要)", out.KPM, targetKPM)
-	default:
-		return fmt.Sprintf("kpm %.0f  ミス %d", out.KPM, out.Errors)
-	}
 }
 
 func printable(text string) string {

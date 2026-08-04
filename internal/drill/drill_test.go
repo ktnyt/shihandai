@@ -7,36 +7,32 @@ import (
 	"github.com/ktnyt/shihandai/internal/curriculum"
 )
 
-// typeLine は units の行を interval 間隔で正しく打ち切り、結果を返す。
-// keys は1単位1打鍵とみなす。
-func typeLine(d *Drill, units []string, interval time.Duration) Outcome {
-	d.StartLine(units)
-	now := time.Unix(0, 0)
-	keys := 0
+// typeWord は units の単語を出題し、正しく打ち切って結果を返す。
+// elapsed は表示から打ち終わりまでの時間。
+func typeWord(d *Drill, units []string, elapsed time.Duration) WordResult {
+	start := time.Unix(0, 0)
+	d.StartWord(units, start)
 	for _, u := range units {
-		keys++
-		d.MarkKeydown(now, keys)
 		d.Input(u)
-		now = now.Add(interval)
 	}
-	return d.FinishLine(now.Add(-interval), keys)
+	return d.FinishWord(start.Add(elapsed))
 }
 
 func TestInputAdvancesOnMatch(t *testing.T) {
 	d := New(DefaultConfig(), 1, nil)
-	d.StartLine([]string{"あ", "い"})
+	d.StartWord([]string{"あ", "い"}, time.Unix(0, 0))
 
 	if got := d.Input("あ"); got != ResultAdvance {
 		t.Fatalf("Input(あ) = %v, want ResultAdvance", got)
 	}
-	if got := d.Input("い"); got != ResultLineDone {
-		t.Fatalf("Input(い) = %v, want ResultLineDone", got)
+	if got := d.Input("い"); got != ResultWordDone {
+		t.Fatalf("Input(い) = %v, want ResultWordDone", got)
 	}
 }
 
 func TestInputErrorDoesNotAdvance(t *testing.T) {
 	d := New(DefaultConfig(), 1, nil)
-	d.StartLine([]string{"あ", "い"})
+	d.StartWord([]string{"あ", "い"}, time.Unix(0, 0))
 
 	if got := d.Input("い"); got != ResultError {
 		t.Fatalf("Input(い) = %v, want ResultError", got)
@@ -44,8 +40,8 @@ func TestInputErrorDoesNotAdvance(t *testing.T) {
 	if d.Pos() != 0 {
 		t.Errorf("Pos() = %d, want 0", d.Pos())
 	}
-	if d.LineErrors() != 1 {
-		t.Errorf("LineErrors() = %d, want 1", d.LineErrors())
+	if d.WordErrors() != 1 {
+		t.Errorf("WordErrors() = %d, want 1", d.WordErrors())
 	}
 	// ミスは打つべきだったかなに記録される
 	if s := d.Stats["あ"]; s == nil || s.Errors != 1 {
@@ -55,7 +51,7 @@ func TestInputErrorDoesNotAdvance(t *testing.T) {
 
 func TestInputIgnoresControlText(t *testing.T) {
 	d := New(DefaultConfig(), 1, nil)
-	d.StartLine([]string{"あ"})
+	d.StartWord([]string{"あ"}, time.Unix(0, 0))
 	for _, text := range []string{" ", "\b", "\n"} {
 		if got := d.Input(text); got != ResultIgnored {
 			t.Errorf("Input(%q) = %v, want ResultIgnored", text, got)
@@ -63,44 +59,89 @@ func TestInputIgnoresControlText(t *testing.T) {
 	}
 }
 
-func TestPromoteOnFastCleanLine(t *testing.T) {
+func TestThresholdScalesWithKeys(t *testing.T) {
 	d := New(DefaultConfig(), 1, nil)
-	// 1打/250ms = 240kpm でノーミス
-	out := typeLine(d, []string{"あ", "い", "な", "す", "る", "あ", "い", "な"}, 250*time.Millisecond)
 
+	// あ(J)+る(I) = 2打鍵。120kpm なら打鍵に1秒、猶予1秒で計2秒
+	d.StartWord([]string{"あ", "る"}, time.Unix(0, 0))
+	if got := d.Threshold(); got != 2*time.Second {
+		t.Errorf("Threshold(ある) = %v, want 2s", got)
+	}
+
+	// が(F+J) は2打鍵で1文字
+	d.StartWord([]string{"が"}, time.Unix(0, 0))
+	if got := d.Threshold(); got != 2*time.Second {
+		t.Errorf("Threshold(が) = %v, want 2s", got)
+	}
+}
+
+func TestFinishWordSuccessAndFailure(t *testing.T) {
+	tests := []struct {
+		name    string
+		elapsed time.Duration
+		miss    bool
+		want    bool
+	}{
+		{"時間内ノーミスは成功", time.Second, false, true},
+		{"時間超過は失敗", 10 * time.Second, false, false},
+		{"ミスがあると失敗", time.Second, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := New(DefaultConfig(), 1, nil)
+			d.StartWord([]string{"あ", "い"}, time.Unix(0, 0))
+			if tt.miss {
+				d.Input("い")
+			}
+			d.Input("あ")
+			d.Input("い")
+			out := d.FinishWord(time.Unix(0, 0).Add(tt.elapsed))
+			if out.Success != tt.want {
+				t.Fatalf("Success = %v, want %v (%+v)", out.Success, tt.want, out)
+			}
+		})
+	}
+}
+
+func TestPromoteWhenWindowRateExceeded(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.WindowSize = 20
+	d := New(cfg, 1, nil)
+
+	// 19/20 = 95% は「95%を上回る」を満たさない
+	var out WordResult
+	out = typeWord(d, []string{"あ", "い"}, 10*time.Second) // 失敗1
+	for range cfg.WindowSize - 1 {
+		out = typeWord(d, []string{"あ", "い"}, time.Second)
+	}
+	if out.Promoted || d.Level != 1 {
+		t.Fatalf("95%%ちょうどで昇格した: Level = %d", d.Level)
+	}
+
+	// 窓が成功で埋まれば昇格し、カウンターが空になる
+	out = typeWord(d, []string{"あ", "い"}, time.Second)
 	if !out.Promoted {
 		t.Fatalf("昇格しなかった: %+v", out)
 	}
 	if d.Level != 2 {
 		t.Errorf("Level = %d, want 2", d.Level)
 	}
-}
-
-func TestNoPromoteWhenSlow(t *testing.T) {
-	d := New(DefaultConfig(), 1, nil)
-	// 1打/1s = 60kpm
-	out := typeLine(d, []string{"あ", "い", "な", "す", "る"}, time.Second)
-
-	if out.Promoted {
-		t.Fatalf("60kpm で昇格してはいけない: %+v", out)
+	if _, total := d.SuccessCount(); total != 0 {
+		t.Errorf("昇格後にカウンターが残っている: %d", total)
 	}
 }
 
-func TestNoPromoteWithErrors(t *testing.T) {
-	d := New(DefaultConfig(), 1, nil)
-	d.StartLine([]string{"あ", "い"})
-	now := time.Unix(0, 0)
-	d.MarkKeydown(now, 1)
-	d.Input("い") // ミス
-	d.Input("あ")
-	d.Input("い")
-	out := d.FinishLine(now.Add(500*time.Millisecond), 3)
-
-	if out.Promoted {
-		t.Fatalf("ミスがあるのに昇格した: %+v", out)
+func TestNoPromoteBeforeWindowFilled(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.WindowSize = 20
+	d := New(cfg, 1, nil)
+	for range cfg.WindowSize - 1 {
+		if out := typeWord(d, []string{"あ", "い"}, time.Second); out.Promoted {
+			t.Fatal("窓が埋まる前に昇格した")
+		}
 	}
-	if out.Errors != 1 {
-		t.Errorf("Errors = %d, want 1", out.Errors)
+	if d.Level != 1 {
+		t.Fatalf("Level = %d, want 1", d.Level)
 	}
 }
 
@@ -108,13 +149,16 @@ func TestDemoteOnLowAccuracy(t *testing.T) {
 	cfg := DefaultConfig()
 	d := New(cfg, 5, nil)
 
-	// 「あ」を直近で大量にミスさせる
-	d.StartLine(makeLine("あ", cfg.MinAttempts))
-	for range cfg.MinAttempts {
-		d.Input("い") // 全部ミス
-		d.Input("あ") // 打ち直して進む
+	// 「あ」を直近で大量にミスさせる。1語につき試行が2回（ミスと打ち直し）
+	// 記録されるので、MinAttempts/2 語で降格判定に届く
+	start := time.Unix(0, 0)
+	var out WordResult
+	for range cfg.MinAttempts / 2 {
+		d.StartWord([]string{"あ"}, start)
+		d.Input("い") // ミス
+		d.Input("あ")
+		out = d.FinishWord(start.Add(time.Second))
 	}
-	out := d.FinishLine(time.Unix(60, 0), cfg.MinAttempts*2)
 
 	if !out.Demoted {
 		t.Fatalf("正答率50%%で降格しなかった: %+v", out)
@@ -126,8 +170,7 @@ func TestDemoteOnLowAccuracy(t *testing.T) {
 		t.Errorf("Level = %d, want 4", d.Level)
 	}
 	// 降格後は直近の記録が捨てられ、連鎖降格しない
-	out = typeLine(d, []string{"あ", "い"}, time.Second)
-	if out.Demoted {
+	if out := typeWord(d, []string{"あ", "い"}, time.Second); out.Demoted {
 		t.Errorf("降格が連鎖した: %+v", out)
 	}
 }
@@ -135,34 +178,37 @@ func TestDemoteOnLowAccuracy(t *testing.T) {
 func TestNoDemoteBelowLevel1(t *testing.T) {
 	cfg := DefaultConfig()
 	d := New(cfg, 1, nil)
-	d.StartLine(makeLine("あ", cfg.MinAttempts))
+	start := time.Unix(0, 0)
+	var out WordResult
 	for range cfg.MinAttempts {
+		d.StartWord([]string{"あ"}, start)
 		d.Input("い")
 		d.Input("あ")
+		out = d.FinishWord(start.Add(time.Second))
 	}
-	out := d.FinishLine(time.Unix(60, 0), cfg.MinAttempts*2)
 	if out.Demoted || d.Level != 1 {
 		t.Fatalf("レベル1から降格した: %+v, Level = %d", out, d.Level)
 	}
 }
 
 func TestNoPromoteAboveMaxLevel(t *testing.T) {
-	d := New(DefaultConfig(), curriculum.MaxLevel(), nil)
-	out := typeLine(d, []string{"あ", "い", "な", "す"}, 100*time.Millisecond)
-	if out.Promoted || d.Level != curriculum.MaxLevel() {
-		t.Fatalf("最大レベルを超えた: %+v, Level = %d", out, d.Level)
+	cfg := DefaultConfig()
+	cfg.WindowSize = 2
+	d := New(cfg, curriculum.MaxLevel(), nil)
+	for range cfg.WindowSize + 1 {
+		typeWord(d, []string{"あ", "い"}, time.Second)
+	}
+	if d.Level != curriculum.MaxLevel() {
+		t.Fatalf("最大レベルを超えた: Level = %d", d.Level)
 	}
 }
 
-func TestKPM(t *testing.T) {
+func TestElapsedMeasuresFromDisplay(t *testing.T) {
 	d := New(DefaultConfig(), 1, nil)
-	d.StartLine([]string{"あ", "い"})
 	start := time.Unix(0, 0)
-	d.MarkKeydown(start, 1)
-
-	// 30秒で60打 → 120kpm (最初の1打も含む)
-	if got := d.KPM(start.Add(30*time.Second), 60); got != 120 {
-		t.Errorf("KPM = %v, want 120", got)
+	d.StartWord([]string{"あ"}, start)
+	if got := d.Elapsed(start.Add(1500 * time.Millisecond)); got != 1500*time.Millisecond {
+		t.Errorf("Elapsed = %v, want 1.5s", got)
 	}
 }
 
@@ -180,12 +226,4 @@ func TestRecentAccuracyWindow(t *testing.T) {
 	if s.Attempts != recentWindow*2 {
 		t.Errorf("Attempts = %d, want %d", s.Attempts, recentWindow*2)
 	}
-}
-
-func makeLine(unit string, n int) []string {
-	line := make([]string, n)
-	for i := range line {
-		line[i] = unit
-	}
-	return line
 }

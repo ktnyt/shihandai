@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ktnyt/shihandai/internal/drill"
 )
@@ -61,8 +62,8 @@ func TestLoadDropsNullStats(t *testing.T) {
 
 	// 読み込んだ状態でそのまま練習しても落ちない
 	d := drill.New(drill.DefaultConfig(), got.Level, got.Stats)
-	d.StartLine([]string{"あ"})
-	if res := d.Input("あ"); res != drill.ResultLineDone {
+	d.StartWord([]string{"あ"}, time.Unix(0, 0))
+	if res := d.Input("あ"); res != drill.ResultWordDone {
 		t.Errorf("Input = %v", res)
 	}
 }

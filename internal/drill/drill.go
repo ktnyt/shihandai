@@ -1,13 +1,18 @@
 // Package drill は練習セッションの進行と昇格・降格の判定を行う。
+//
+// 出題は1単語ずつ。単語が表示された瞬間から打ち終わるまでを計測し、
+// ノーミスかつしきい値時間内なら成功と数える。直近の成功率が基準を
+// 超えたらレベルアップする。並行安全ではない。
 package drill
 
 import (
 	"time"
 
 	"github.com/ktnyt/shihandai/internal/curriculum"
+	"github.com/ktnyt/shihandai/internal/naginata"
 )
 
-// recentWindow は直近正答率を測る試行数。
+// recentWindow は1つのかなの直近正答率を測る試行数。
 const recentWindow = 12
 
 // UnitStat は1つのかなの成績。
@@ -44,14 +49,24 @@ func (s *UnitStat) RecentAccuracy() float64 {
 
 // Config は判定の調整項目。
 type Config struct {
-	TargetKPM      float64 // 昇格に必要な打鍵速度 (keys per minute)
-	DemoteAccuracy float64 // これを下回ると降格する直近正答率
-	MinAttempts    int     // 降格判定に必要な直近試行数
+	TargetKPM      float64       // 目標打鍵速度。しきい値時間の計算に使う
+	ReactionBudget time.Duration // 表示から打ち始めるまでの猶予
+	WindowSize     int           // 成功率を測る直近の単語数
+	PromoteRate    float64       // これを上回ったらレベルアップする成功率
+	DemoteAccuracy float64       // これを下回ると降格するかなの直近正答率
+	MinAttempts    int           // 降格判定に必要な直近試行数
 }
 
 // DefaultConfig は既定値を返す。
 func DefaultConfig() Config {
-	return Config{TargetKPM: 120, DemoteAccuracy: 0.85, MinAttempts: 8}
+	return Config{
+		TargetKPM:      120,
+		ReactionBudget: time.Second,
+		WindowSize:     100,
+		PromoteRate:    0.95,
+		DemoteAccuracy: 0.85,
+		MinAttempts:    8,
+	}
 }
 
 // Drill は練習全体の状態。
@@ -60,12 +75,11 @@ type Drill struct {
 	Level int
 	Stats map[string]*UnitStat
 
-	line       []string
+	word       []string
 	pos        int
-	lineErrors int
-	started    bool
-	startTime  time.Time
-	startKeys  int
+	wordErrors int
+	shownAt    time.Time
+	results    []bool // 直近 WindowSize 単語の成否
 }
 
 // New は練習状態を作る。
@@ -85,39 +99,52 @@ func New(cfg Config, level int, stats map[string]*UnitStat) *Drill {
 // Allowed は現在のレベルで使えるかなを返す。
 func (d *Drill) Allowed() []string { return curriculum.For(d.Level) }
 
-// StartLine は新しい行を開始する。
-func (d *Drill) StartLine(units []string) {
-	d.line = units
+// StartWord は新しい単語を出題する。now は表示した時刻。
+func (d *Drill) StartWord(units []string, now time.Time) {
+	d.word = units
 	d.pos = 0
-	d.lineErrors = 0
-	d.started = false
+	d.wordErrors = 0
+	d.shownAt = now
 }
 
-// Line は現在の行を返す。
-func (d *Drill) Line() []string { return d.line }
+// Word は現在の単語を返す。
+func (d *Drill) Word() []string { return d.word }
 
 // Pos は現在の入力位置を返す。
 func (d *Drill) Pos() int { return d.pos }
 
-// LineErrors は現在の行でのミス数を返す。
-func (d *Drill) LineErrors() int { return d.lineErrors }
+// WordErrors は現在の単語でのミス数を返す。
+func (d *Drill) WordErrors() int { return d.wordErrors }
 
-// Expected は次に打つべきかなを返す。行末なら空文字。
+// Expected は次に打つべきかなを返す。単語の終わりなら空文字。
 func (d *Drill) Expected() string {
-	if d.pos >= len(d.line) {
+	if d.pos >= len(d.word) {
 		return ""
 	}
-	return d.line[d.pos]
+	return d.word[d.pos]
 }
 
-// MarkKeydown は行の最初の打鍵で計時を始める。keys は総打鍵数。
-func (d *Drill) MarkKeydown(now time.Time, keys int) {
-	if !d.started {
-		d.started = true
-		d.startTime = now
-		// 最初の1打も含めて数える
-		d.startKeys = keys - 1
+// Elapsed は表示からの経過時間を返す。
+func (d *Drill) Elapsed(now time.Time) time.Duration {
+	if d.shownAt.IsZero() {
+		return 0
 	}
+	return now.Sub(d.shownAt)
+}
+
+// Threshold は現在の単語を成功とみなす制限時間を返す。
+// 反応の猶予に、打鍵数ぶんの時間を目標打鍵速度で換算して足す。
+func (d *Drill) Threshold() time.Duration {
+	keys := 0
+	for _, u := range d.word {
+		if chord, ok := naginata.ChordFor(u); ok {
+			keys += chord.Count()
+		} else {
+			keys++
+		}
+	}
+	typing := time.Duration(float64(keys) / d.Cfg.TargetKPM * float64(time.Minute))
+	return d.Cfg.ReactionBudget + typing
 }
 
 // Result は1回の入力の判定結果。
@@ -130,13 +157,13 @@ const (
 	ResultAdvance
 	// ResultError は誤った入力。位置は進まない。
 	ResultError
-	// ResultLineDone は行の最後の単位を正しく入力した。
-	ResultLineDone
+	// ResultWordDone は単語の最後の単位を正しく入力した。
+	ResultWordDone
 )
 
 // Input は確定した1単位を判定する。
 func (d *Drill) Input(text string) Result {
-	if d.pos >= len(d.line) {
+	if d.pos >= len(d.word) {
 		return ResultIgnored
 	}
 	switch text {
@@ -144,17 +171,17 @@ func (d *Drill) Input(text string) Result {
 		return ResultIgnored
 	}
 
-	expected := d.line[d.pos]
+	expected := d.word[d.pos]
 	if text == expected {
 		d.stat(expected).record(true)
 		d.pos++
-		if d.pos >= len(d.line) {
-			return ResultLineDone
+		if d.pos >= len(d.word) {
+			return ResultWordDone
 		}
 		return ResultAdvance
 	}
 	d.stat(expected).record(false)
-	d.lineErrors++
+	d.wordErrors++
 	return ResultError
 }
 
@@ -168,31 +195,41 @@ func (d *Drill) stat(unit string) *UnitStat {
 	return s
 }
 
-// KPM は現在の行の打鍵速度を返す。keys は総打鍵数。
-func (d *Drill) KPM(now time.Time, keys int) float64 {
-	if !d.started {
-		return 0
+// SuccessCount は直近の成功数と試行数を返す。
+func (d *Drill) SuccessCount() (successes, total int) {
+	for _, ok := range d.results {
+		if ok {
+			successes++
+		}
 	}
-	mins := now.Sub(d.startTime).Minutes()
-	if mins <= 0 {
-		return 0
-	}
-	return float64(keys-d.startKeys) / mins
+	return successes, len(d.results)
 }
 
-// Outcome は行を打ち終えたときの判定。
-type Outcome struct {
-	KPM      float64
-	Errors   int
-	Promoted bool
-	Demoted  bool
+// WordResult は単語を打ち終えたときの判定。
+type WordResult struct {
+	Success   bool
+	Duration  time.Duration
+	Threshold time.Duration
+	Errors    int
+	Promoted  bool
+	Demoted   bool
 	// WeakUnit は降格の原因になったかな。
 	WeakUnit string
 }
 
-// FinishLine は行の結果を集計し、昇格・降格を反映する。
-func (d *Drill) FinishLine(now time.Time, keys int) Outcome {
-	out := Outcome{KPM: d.KPM(now, keys), Errors: d.lineErrors}
+// FinishWord は単語の結果を集計し、昇格・降格を反映する。
+func (d *Drill) FinishWord(now time.Time) WordResult {
+	out := WordResult{
+		Duration:  d.Elapsed(now),
+		Threshold: d.Threshold(),
+		Errors:    d.wordErrors,
+	}
+	out.Success = out.Errors == 0 && out.Duration <= out.Threshold
+
+	d.results = append(d.results, out.Success)
+	if len(d.results) > d.Cfg.WindowSize {
+		d.results = d.results[len(d.results)-d.Cfg.WindowSize:]
+	}
 
 	// 正答率が下がったかなが出たら1つ降格する
 	if d.Level > 1 {
@@ -205,18 +242,27 @@ func (d *Drill) FinishLine(now time.Time, keys int) Outcome {
 				d.Level--
 				out.Demoted = true
 				out.WeakUnit = unit
-				// 降格の連鎖を防ぐため、直近の記録は捨てる
-				for _, st := range d.Stats {
-					st.Recent = nil
-				}
+				d.resetProgress()
 				return out
 			}
 		}
 	}
 
-	if d.lineErrors == 0 && out.KPM >= d.Cfg.TargetKPM && d.Level < curriculum.MaxLevel() {
+	// 窓が埋まっていて成功率が基準を上回ったらレベルアップ
+	if successes, total := d.SuccessCount(); total >= d.Cfg.WindowSize &&
+		float64(successes)/float64(total) > d.Cfg.PromoteRate &&
+		d.Level < curriculum.MaxLevel() {
 		d.Level++
 		out.Promoted = true
+		d.results = nil
 	}
 	return out
+}
+
+// resetProgress は降格時に判定の記録を捨て、連鎖降格を防ぐ。
+func (d *Drill) resetProgress() {
+	d.results = nil
+	for _, st := range d.Stats {
+		st.Recent = nil
+	}
 }
