@@ -44,6 +44,17 @@ func (m Model) View() string {
 		styleFaint.Render("使えるかな:"),
 		wrapKana(allowed, max(m.width-8, 40)))
 
+	if m.leveledUp {
+		fmt.Fprintf(&b, "  %s\n\n", styleNotice.Render(fmt.Sprintf("レベルアップ! レベル %d", m.drill.Level)))
+		if chord, ok := naginata.ChordFor(newest); ok {
+			fmt.Fprintf(&b, "  あたらしいかな: %s %s\n\n",
+				styleCurrent.Render(newest),
+				styleHint.Render("["+chord.Label()+"]"))
+		}
+		b.WriteString("  " + styleFaint.Render("Space ではじめる、Esc で終了") + "\n")
+		return b.String()
+	}
+
 	// 出題中の単語（入力済み、現在位置、残りで塗り分け）。
 	// 一時停止中はレイアウトを保ったまま伏せ字にする
 	pos := m.drill.Pos()

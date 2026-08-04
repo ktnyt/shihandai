@@ -150,8 +150,58 @@ func TestPromoteAfterWindowFilledWithSuccess(t *testing.T) {
 	if m.drill.Level != 2 {
 		t.Fatalf("Level = %d, want 2 (窓が成功で埋まったら昇格)", m.drill.Level)
 	}
-	if !strings.Contains(m.View(), "新しいかなを追加") {
-		t.Errorf("昇格メッセージが出ていない:\n%s", m.View())
+
+	// レベルアップ画面が出て、新しいかなが紹介される
+	view := m.View()
+	newest := m.drill.Allowed()[len(m.drill.Allowed())-1]
+	for _, want := range []string{"レベルアップ", "あたらしいかな", newest, "Space"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("レベルアップ画面に %q がない:\n%s", want, view)
+		}
+	}
+
+	// かなキーは無視される
+	before := m.drill.Word()
+	m = pressChord(m, naginata.Set(naginata.KeyJ))
+	if !slices.Equal(m.drill.Word(), before) || !m.leveledUp {
+		t.Fatal("レベルアップ画面でかなキーが処理された")
+	}
+
+	// Space で新しいレベルの単語が始まる
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	m = next.(Model)
+	if m.leveledUp {
+		t.Fatal("Space でレベルアップ画面が閉じない")
+	}
+	if len(m.drill.Word()) == 0 || m.drill.Pos() != 0 {
+		t.Fatalf("次の単語が始まっていない: word=%v pos=%d", m.drill.Word(), m.drill.Pos())
+	}
+	// 再開後は普通に打てる
+	m = typeWord(t, m)
+	if _, total := m.drill.SuccessCount(); total != 1 {
+		t.Errorf("レベルアップ後の単語が判定されていない")
+	}
+}
+
+func TestEscOnLevelUpScreenQuits(t *testing.T) {
+	engine := naginata.NewEngine(80 * time.Millisecond)
+	cfg := drill.DefaultConfig()
+	cfg.WindowSize = 2
+	d := drill.New(cfg, 1, nil)
+	gen := lesson.NewGenerator(lesson.DefaultConfig(), rand.New(rand.NewSource(1)))
+	m, err := New(engine, d, gen, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range cfg.WindowSize {
+		m = typeWord(t, m)
+	}
+	if !m.leveledUp {
+		t.Fatal("前提が崩れた: レベルアップ画面になっていない")
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatal("レベルアップ画面の Esc で終了コマンドが返らない")
 	}
 }
 

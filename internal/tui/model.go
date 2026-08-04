@@ -23,11 +23,12 @@ type Model struct {
 
 	statePath string
 
-	paused  bool
-	width   int
-	message string
-	flash   string
-	err     error
+	paused    bool
+	leveledUp bool // レベルアップ画面を表示中
+	width     int
+	message   string
+	flash     string
+	err       error
 }
 
 // New は画面を作り、最初の単語を出題する。
@@ -68,7 +69,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// 終了時の保存は main 側が同期的に行う
 			return m, tea.Quit
 		case tea.KeyEsc:
-			if m.paused {
+			if m.paused || m.leveledUp {
 				return m, tea.Quit
 			}
 			// 単語を隠して計測を止める。打ちかけのキーは捨てる
@@ -77,13 +78,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flash = ""
 			return m, nil
 		case tea.KeySpace:
+			if m.leveledUp {
+				// 新しいレベルの最初の単語を出題する
+				m.leveledUp = false
+				m.message = ""
+				if err := m.newWord(time.Now()); err != nil {
+					m.err = err
+					return m, tea.Quit
+				}
+				return m, nil
+			}
 			if m.paused {
 				m.resume(time.Now())
 				return m, nil
 			}
 			return m, m.press(naginata.KeySpace, time.Now())
 		case tea.KeyRunes:
-			if m.paused {
+			if m.paused || m.leveledUp {
 				return m, nil
 			}
 			now := time.Now()
@@ -101,7 +112,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		now := time.Time(msg)
-		if m.paused {
+		if m.paused || m.leveledUp {
 			return m, m.tick()
 		}
 		return m, tea.Batch(m.tick(), m.handleEmissions(m.engine.Flush(now), now))
@@ -138,6 +149,12 @@ func (m *Model) handleEmissions(ems []naginata.Emission, now time.Time) tea.Cmd 
 			out := m.drill.FinishWord(now)
 			m.message = resultMessage(out)
 			saveCmd := m.save()
+			if out.Promoted {
+				// 次の単語は出さず、レベルアップ画面で Space を待つ
+				m.leveledUp = true
+				m.engine.Reset()
+				return saveCmd
+			}
 			if err := m.newWord(now); err != nil {
 				m.err = err
 				return tea.Quit

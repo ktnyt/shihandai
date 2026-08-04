@@ -58,14 +58,17 @@ type Config struct {
 }
 
 // DefaultConfig は既定値を返す。
+// 降格はゆるめにしてある。新しいかなが入ると既存のかなも文脈が変わって
+// 一時的に難しくなるので、直近12回が埋まった上で4ミス以上（70%未満）で
+// はじめて降格する。
 func DefaultConfig() Config {
 	return Config{
 		TargetKPM:      120,
 		ReactionBudget: time.Second,
 		WindowSize:     100,
 		PromoteRate:    0.95,
-		DemoteAccuracy: 0.85,
-		MinAttempts:    8,
+		DemoteAccuracy: 0.70,
+		MinAttempts:    recentWindow,
 	}
 }
 
