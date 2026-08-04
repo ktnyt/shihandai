@@ -175,6 +175,47 @@ func TestDemoteOnLowAccuracy(t *testing.T) {
 	}
 }
 
+func TestNoDemoteOnNewestKana(t *testing.T) {
+	cfg := DefaultConfig()
+	d := New(cfg, 5, nil)
+	allowed := d.Allowed()
+	newest := allowed[len(allowed)-1]
+	old := allowed[0]
+
+	// 覚えている最中のいちばん新しいかなをいくらミスしても降格しない
+	start := time.Unix(0, 0)
+	for range cfg.MinAttempts {
+		d.StartWord([]string{newest}, start)
+		d.Input(old) // ミス
+		d.Input(newest)
+		if out := d.FinishWord(start.Add(time.Second)); out.Demoted {
+			t.Fatalf("新出かな %q のミスで降格した", newest)
+		}
+	}
+	if d.Level != 5 {
+		t.Fatalf("Level = %d, want 5", d.Level)
+	}
+}
+
+func TestTimeoutFailureDoesNotDemote(t *testing.T) {
+	cfg := DefaultConfig()
+	d := New(cfg, 5, nil)
+
+	// 時間超過の失敗をいくら重ねても、打ち間違いがなければ降格しない
+	for range cfg.MinAttempts * 3 {
+		out := typeWord(d, []string{"あ", "い"}, 10*time.Second)
+		if out.Success {
+			t.Fatal("前提が崩れた: 時間超過なのに成功になった")
+		}
+		if out.Demoted {
+			t.Fatal("時間超過で降格した")
+		}
+	}
+	if d.Level != 5 {
+		t.Fatalf("Level = %d, want 5", d.Level)
+	}
+}
+
 func TestNoDemoteBelowLevel1(t *testing.T) {
 	cfg := DefaultConfig()
 	d := New(cfg, 1, nil)

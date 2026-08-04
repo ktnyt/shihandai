@@ -231,9 +231,13 @@ func (d *Drill) FinishWord(now time.Time) WordResult {
 		d.results = d.results[len(d.results)-d.Cfg.WindowSize:]
 	}
 
-	// 正答率が下がったかなが出たら1つ降格する
+	// 正答率が下がったかなが出たら1つ降格する。
+	// 覚えている最中のいちばん新しいかなは対象外。
+	// 時間超過は打ち間違いではないので、ここには影響しない
+	// （かなの統計は入力の正誤だけを記録している）。
 	if d.Level > 1 {
-		for _, unit := range d.Allowed() {
+		allowed := d.Allowed()
+		for _, unit := range allowed[:len(allowed)-1] {
 			s := d.Stats[unit]
 			if s == nil || len(s.Recent) < d.Cfg.MinAttempts {
 				continue
