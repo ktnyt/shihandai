@@ -19,17 +19,10 @@
 8. 濁音・半濁音の拗音
 9. 外来音
 
-例文はローカルの LFM2.5（Ollama 経由）が、そのレベルで打てるかなだけを使って生成する。
-生成が検証を通らないときは、内蔵の単語バンクから組み立てる。
-
-## 必要なもの
-
-- Go 1.25 以上
-- Ollama と LFM2.5（なくても動く。その場合は単語バンクだけで練習する）
-
-```sh
-ollama pull hf.co/LiquidAI/LFM2.5-8B-A1B-GGUF:Q6_K
-```
+出題は単語単位で行う。
+頻度順の辞書（mozc の OSS 辞書から抽出した約2万語）から、
+そのレベルのかなだけで打てる単語を選んで並べる。
+新しく覚えるかなと苦手なかなを含む単語が優先して出る。
 
 ## 使い方
 
@@ -37,7 +30,7 @@ ollama pull hf.co/LiquidAI/LFM2.5-8B-A1B-GGUF:Q6_K
 go run ./cmd/shihandai
 ```
 
-画面に出た例文を薙刀式で打つ。
+画面に出た単語列を薙刀式で打つ。単語の区切りに打鍵は要らない。
 かなの下に運指のヒント（`か → F`、`が → F+J`、`の → Space+J`）が出る。
 Esc で終了する。進捗は自動で保存され、次回は続きから始まる。
 
@@ -45,12 +38,9 @@ Esc で終了する。進捗は自動で保存され、次回は続きから始�
 
 | フラグ | 既定値 | 意味 |
 |---|---|---|
-| `-model` | `hf.co/LiquidAI/LFM2.5-8B-A1B-GGUF:Q6_K` | Ollama のモデル名 |
-| `-url` | `http://localhost:11434` | Ollama のURL |
 | `-window` | `80ms` | 同時押しの判定ウィンドウ |
 | `-kpm` | `120` | 昇格に必要な打鍵速度 |
 | `-min-acc` | `0.85` | これを下回ると降格する直近正答率 |
-| `-no-llm` | `false` | LLMを使わない |
 | `-reset` | `false` | 進捗を消してやり直す |
 
 ## 同時押しの扱い
@@ -65,11 +55,22 @@ QMK実装と同じ最長一致の貪欲法でかなに確定する。
 naginata_v15（薙刀式 v15）に準拠する。
 編集モードは対象外。
 
+## 辞書の再生成
+
+単語リスト `internal/dict/words.txt` は
+[mozc](https://github.com/google/mozc) の OSS 辞書
+（`src/data/dictionary_oss/`、BSD-3-Clause）から生成した。
+作り直すときは `dictionary0*.txt` と `id.def` を置いたディレクトリを指定して実行する。
+
+```sh
+go run ./tools/mkdict -dict-dir <辞書のディレクトリ> -out internal/dict/words.txt -n 20000
+```
+
+一般語の基本形だけを残し、読みをひらがなに直し、
+薙刀式で打てる語をコスト（頻度）順に並べている。
+
 ## 開発
 
 ```sh
 go test -race ./...
-
-# Ollama につないだ生成の通し確認
-SHIHANDAI_LIVE=1 go test -run TestOllamaLive -v ./internal/sentence/
 ```

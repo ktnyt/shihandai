@@ -12,7 +12,6 @@ import (
 	"github.com/ktnyt/shihandai/internal/curriculum"
 	"github.com/ktnyt/shihandai/internal/drill"
 	"github.com/ktnyt/shihandai/internal/naginata"
-	"github.com/ktnyt/shihandai/internal/sentence"
 )
 
 var (
@@ -46,24 +45,24 @@ func (m Model) View() string {
 		styleFaint.Render("使えるかな:"),
 		wrapKana(allowed, max(m.width-8, 40)))
 
-	if m.state == stateLoading {
-		elapsed := time.Since(m.loadingSince).Round(time.Second)
-		b.WriteString(styleFaint.Render(fmt.Sprintf("例文を生成中… (%s)", elapsed)) + "\n")
-		return b.String()
-	}
-
-	// 例文（入力済み、現在位置、残りで塗り分ける）
-	line := m.drill.Line()
+	// 単語列（入力済み、現在位置、残りで塗り分け、単語の間は空ける）
 	pos := m.drill.Pos()
 	var lineView strings.Builder
-	for i, u := range line {
-		switch {
-		case i < pos:
-			lineView.WriteString(styleDone.Render(u))
-		case i == pos:
-			lineView.WriteString(styleCurrent.Render(u))
-		default:
-			lineView.WriteString(styleTodo.Render(u))
+	idx := 0
+	for wi, word := range m.line.Words {
+		if wi > 0 {
+			lineView.WriteString(" ")
+		}
+		for _, u := range word {
+			switch {
+			case idx < pos:
+				lineView.WriteString(styleDone.Render(u))
+			case idx == pos:
+				lineView.WriteString(styleCurrent.Render(u))
+			default:
+				lineView.WriteString(styleTodo.Render(u))
+			}
+			idx++
 		}
 	}
 	b.WriteString("  " + lineView.String() + "\n\n")
@@ -79,11 +78,8 @@ func (m Model) View() string {
 
 	// ステータス行
 	kpm := m.drill.KPM(time.Now(), m.engine.Presses())
-	fmt.Fprintf(&b, "\n  kpm %5.0f / %.0f   ミス %d   例文: %s\n",
-		kpm, m.drill.Cfg.TargetKPM, m.drill.LineErrors(), sourceLabel(m.line.Source, m.llmName))
-	if m.line.LLMError != "" {
-		b.WriteString("  " + styleFaint.Render("LLMを使えなかった: "+m.line.LLMError) + "\n")
-	}
+	fmt.Fprintf(&b, "\n  kpm %5.0f / %.0f   ミス %d\n",
+		kpm, m.drill.Cfg.TargetKPM, m.drill.LineErrors())
 
 	if m.flash != "" {
 		b.WriteString("  " + styleError.Render(m.flash) + "\n")
@@ -92,40 +88,45 @@ func (m Model) View() string {
 		b.WriteString("  " + styleNotice.Render(m.message) + "\n")
 	}
 
-	if weak := m.weakUnits(3); weak != "" {
+	if weak := m.weakLabel(3); weak != "" {
 		b.WriteString("\n" + styleFaint.Render("にがて: "+weak) + "\n")
 	}
 	return b.String()
 }
 
-// weakUnits は直近正答率の低いかなを上位 n 件返す。
-func (m Model) weakUnits(n int) string {
-	type item struct {
-		unit string
-		acc  float64
-	}
-	var items []item
+type weakItem struct {
+	unit string
+	acc  float64
+}
+
+// weakItems は直近正答率の低いかなを上位 n 件返す。
+func (m Model) weakItems(n int) []weakItem {
+	var items []weakItem
 	for _, u := range m.drill.Allowed() {
 		s, ok := m.drill.Stats[u]
-		if !ok || len(s.Recent) == 0 {
+		if !ok || s == nil || len(s.Recent) == 0 {
 			continue
 		}
 		if acc := s.RecentAccuracy(); acc < 1 {
-			items = append(items, item{u, acc})
+			items = append(items, weakItem{u, acc})
 		}
 	}
 	// 同率のときに表示がちらつかないよう、かなを第2キーにして安定に並べる
-	slices.SortStableFunc(items, func(a, b item) int {
+	slices.SortStableFunc(items, func(a, b weakItem) int {
 		if c := cmp.Compare(a.acc, b.acc); c != 0 {
 			return c
 		}
 		return cmp.Compare(a.unit, b.unit)
 	})
+	if len(items) > n {
+		items = items[:n]
+	}
+	return items
+}
+
+func (m Model) weakLabel(n int) string {
 	var parts []string
-	for i, it := range items {
-		if i >= n {
-			break
-		}
+	for _, it := range m.weakItems(n) {
 		parts = append(parts, fmt.Sprintf("%s %.0f%%", it.unit, it.acc*100))
 	}
 	return strings.Join(parts, "  ")
@@ -144,16 +145,6 @@ func wrapKana(units []string, width int) string {
 		}
 	}
 	return joined
-}
-
-func sourceLabel(source sentence.Source, llmName string) string {
-	switch source {
-	case sentence.SourceLLM:
-		return llmName
-	case sentence.SourceWordbank:
-		return "単語バンク"
-	}
-	return "-"
 }
 
 func outcomeMessage(out drill.Outcome, targetKPM float64) string {

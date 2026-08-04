@@ -1,8 +1,5 @@
-// Package sentence は練習用の例文を生成する。
-// LFM2.5 (Ollama) による生成を試み、失敗した場合は単語バンクから組み立てる。
-package sentence
-
-import "strings"
+// Package lesson は練習する単語列を辞書から組み立てる。
+package lesson
 
 // Segment は text を allowed の単位（拗音は2文字で1単位）に分割する。
 // 最長一致で分割し、分割できない文字があれば ok=false を返す。
@@ -44,23 +41,4 @@ func (s unitSet) segment(text string) (units []string, ok bool) {
 		}
 	}
 	return units, true
-}
-
-// Normalize は生成結果を検証しやすい形に整える。
-// 空白と句読点を除き、カタカナをひらがなに変換する。
-func Normalize(text string) string {
-	var b strings.Builder
-	for _, r := range text {
-		switch {
-		case r == ' ' || r == '　' || r == '\n' || r == '\t' ||
-			r == '、' || r == '。' || r == '，' || r == '．' ||
-			r == '「' || r == '」' || r == '！' || r == '？' || r == '!' || r == '?':
-			continue
-		case r >= 'ァ' && r <= 'ヶ':
-			b.WriteRune(r - 'ァ' + 'ぁ')
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }

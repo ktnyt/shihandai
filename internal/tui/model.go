@@ -2,68 +2,48 @@
 package tui
 
 import (
-	"context"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ktnyt/shihandai/internal/drill"
+	"github.com/ktnyt/shihandai/internal/lesson"
 	"github.com/ktnyt/shihandai/internal/naginata"
-	"github.com/ktnyt/shihandai/internal/sentence"
 	"github.com/ktnyt/shihandai/internal/store"
 )
 
 const tickInterval = 30 * time.Millisecond
 
-type state int
-
-const (
-	stateLoading state = iota
-	stateTyping
-)
-
 // Model は画面全体の状態。
 type Model struct {
 	engine *naginata.Engine
 	drill  *drill.Drill
-	gen    *sentence.Generator
+	gen    *lesson.Generator
 
 	statePath string
-	llmName   string
 
-	state        state
-	line         sentence.Line
-	next         *lineMsg // 打鍵中に先読みした次の行
-	pending      bool     // 生成リクエストが飛んでいる間 true
-	loadingSince time.Time
-	width        int
-	message      string
-	flash        string
-	err          error
+	line    lesson.Line
+	width   int
+	message string
+	flash   string
+	err     error
 }
 
-// New は画面を作る。
-func New(engine *naginata.Engine, d *drill.Drill, gen *sentence.Generator, statePath, llmName string) Model {
-	return Model{
+// New は画面を作り、最初の行を用意する。
+func New(engine *naginata.Engine, d *drill.Drill, gen *lesson.Generator, statePath string) (Model, error) {
+	m := Model{
 		engine:    engine,
 		drill:     d,
 		gen:       gen,
 		statePath: statePath,
-		llmName:   llmName,
-		state:     stateLoading,
-		// Init が返す生成コマンドの分。Init はモデルを返せないのでここで立てる
-		pending:      true,
-		loadingSince: time.Now(),
 	}
+	if err := m.newLine(); err != nil {
+		return Model{}, err
+	}
+	return m, nil
 }
 
 type tickMsg time.Time
-
-type lineMsg struct {
-	level int // 生成時のレベル。今のレベルと違ったら捨てる
-	line  sentence.Line
-	err   error
-}
 
 type saveErrMsg struct{ err error }
 
@@ -71,32 +51,8 @@ func (m Model) tick() tea.Cmd {
 	return tea.Tick(tickInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
-// generateCmd はレベルに合わせて1行生成するコマンドを作る。
-func generateCmd(gen *sentence.Generator, level int, allowed []string) tea.Cmd {
-	return func() tea.Msg {
-		// リトライと単語バンクへの切り替えまで含めた全体の上限
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-		defer cancel()
-		line, err := gen.Generate(ctx, allowed)
-		return lineMsg{level: level, line: line, err: err}
-	}
-}
-
-// generate は現在のレベルの生成コマンドを返す。
-// すでにリクエストが飛んでいれば何もしない。
-func (m *Model) generate() tea.Cmd {
-	if m.pending {
-		return nil
-	}
-	m.pending = true
-	return generateCmd(m.gen, m.drill.Level, m.drill.Allowed())
-}
-
-// Init は最初の例文生成と定期処理を開始する。
-// New で pending を立ててあるので、ここでは guard なしでコマンドだけ返す。
-func (m Model) Init() tea.Cmd {
-	return tea.Batch(generateCmd(m.gen, m.drill.Level, m.drill.Allowed()), m.tick())
-}
+// Init は定期処理を開始する。
+func (m Model) Init() tea.Cmd { return m.tick() }
 
 // Update はイベントを処理する。
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -111,77 +67,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// 終了時の保存は main 側が同期的に行う
 			return m, tea.Quit
 		case tea.KeyRunes:
-			if m.state != stateTyping {
-				return m, nil
-			}
 			now := time.Now()
 			var cmds []tea.Cmd
 			for _, r := range msg.Runes {
 				if key, ok := naginata.KeyFromRune(r); ok {
-					ems := m.engine.Press(key, now)
-					m.drill.MarkKeydown(now, m.engine.Presses())
-					if cmd := m.handleEmissions(ems, now); cmd != nil {
+					if cmd := m.press(key, now); cmd != nil {
 						cmds = append(cmds, cmd)
 					}
 				}
 			}
 			return m, tea.Batch(cmds...)
 		case tea.KeySpace:
-			if m.state != stateTyping {
-				return m, nil
-			}
-			now := time.Now()
-			ems := m.engine.Press(naginata.KeySpace, now)
-			m.drill.MarkKeydown(now, m.engine.Presses())
-			return m, m.handleEmissions(ems, now)
+			return m, m.press(naginata.KeySpace, time.Now())
 		}
 		return m, nil
 
 	case tickMsg:
 		now := time.Time(msg)
-		var cmd tea.Cmd
-		if m.state == stateTyping {
-			cmd = m.handleEmissions(m.engine.Flush(now), now)
-		}
-		return m, tea.Batch(m.tick(), cmd)
+		return m, tea.Batch(m.tick(), m.handleEmissions(m.engine.Flush(now), now))
 
 	case saveErrMsg:
 		m.message = "保存に失敗: " + msg.err.Error()
-		return m, nil
-
-	case lineMsg:
-		m.pending = false
-		if msg.err != nil {
-			m.err = msg.err
-			return m, tea.Quit
-		}
-		if msg.level != m.drill.Level {
-			// レベルが変わって古くなった行は捨てて作り直す
-			if m.state == stateLoading {
-				return m, m.generate()
-			}
-			return m, nil
-		}
-		if m.state == stateLoading {
-			m.startLine(msg.line)
-			// 打鍵中に次の行を先読みしておく
-			return m, m.generate()
-		}
-		m.next = &msg
 		return m, nil
 	}
 	return m, nil
 }
 
-func (m *Model) startLine(line sentence.Line) {
-	m.engine.Reset() // 前の行の打ちかけを持ち越さない
-	m.line = line
-	m.drill.StartLine(line.Units)
-	m.state = stateTyping
-	m.flash = ""
+func (m *Model) press(key naginata.Key, now time.Time) tea.Cmd {
+	ems := m.engine.Press(key, now)
+	m.drill.MarkKeydown(now, m.engine.Presses())
+	return m.handleEmissions(ems, now)
 }
 
-// handleEmissions は確定したかなを判定に流す。行が終わったら次の生成を返す。
+// handleEmissions は確定したかなを判定に流す。行が終わったら次の行を作る。
 func (m *Model) handleEmissions(ems []naginata.Emission, now time.Time) tea.Cmd {
 	for _, em := range ems {
 		switch m.drill.Input(em.Text) {
@@ -193,20 +111,37 @@ func (m *Model) handleEmissions(ems []naginata.Emission, now time.Time) tea.Cmd 
 			out := m.drill.FinishLine(now, m.engine.Presses())
 			m.message = outcomeMessage(out, m.drill.Cfg.TargetKPM)
 			saveCmd := m.save()
-			// 先読みした行がレベルと合っていればすぐ次を始める
-			if m.next != nil && m.next.level == m.drill.Level {
-				line := m.next.line
-				m.next = nil
-				m.startLine(line)
-				return tea.Batch(saveCmd, m.generate())
+			if err := m.newLine(); err != nil {
+				m.err = err
+				return tea.Quit
 			}
-			m.next = nil
-			m.state = stateLoading
-			m.loadingSince = now
-			return tea.Batch(saveCmd, m.generate())
+			return saveCmd
 		}
 	}
 	return nil
+}
+
+// newLine は現在のレベルに合った行を辞書から組み立てる。
+func (m *Model) newLine() error {
+	line, err := m.gen.Generate(m.drill.Allowed(), m.focusUnits())
+	if err != nil {
+		return err
+	}
+	m.engine.Reset() // 前の行の打ちかけを持ち越さない
+	m.line = line
+	m.drill.StartLine(line.Units())
+	m.flash = ""
+	return nil
+}
+
+// focusUnits は優先して出題したいかな（新出と苦手）を返す。
+func (m *Model) focusUnits() []string {
+	allowed := m.drill.Allowed()
+	focus := append([]string{}, allowed[max(len(allowed)-2, 0):]...)
+	for _, w := range m.weakItems(3) {
+		focus = append(focus, w.unit)
+	}
+	return focus
 }
 
 // save は進捗の書き込みコマンドを返す。
