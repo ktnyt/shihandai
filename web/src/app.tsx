@@ -9,8 +9,9 @@ import { chordLabel, keyFromCode, KeySpace } from "./lib/keys";
 import { groupOf, maxLevel } from "./lib/curriculum";
 import * as store from "./lib/store";
 import {
-  DEFAULT_SETTINGS,
   loadSettings,
+  matchPreset,
+  PRESETS,
   sanitize,
   saveSettings,
   type Settings,
@@ -23,19 +24,20 @@ function applySettings(session: Session, s: Settings): void {
   const cfg = session.drill.cfg;
   cfg.targetKPM = s.targetKPM;
   cfg.maxMissRate = s.maxMissRate;
-  cfg.reactionBudgetMs = s.reactionBudgetMs;
   cfg.windowSize = s.windowSize;
   cfg.minNewKanaWords = s.minNewKanaWords;
+  cfg.requireBackspace = s.requireBackspace;
   session.intervalMs = s.intervalMs;
+  session.upcomingWords = s.upcomingWords;
 }
 
 function createSession(settings: Settings, onChange: () => void): Session {
   const cfg = { ...DEFAULT_DRILL_CONFIG };
   cfg.targetKPM = settings.targetKPM;
   cfg.maxMissRate = settings.maxMissRate;
-  cfg.reactionBudgetMs = settings.reactionBudgetMs;
   cfg.windowSize = settings.windowSize;
   cfg.minNewKanaWords = settings.minNewKanaWords;
+  cfg.requireBackspace = settings.requireBackspace;
 
   const state = store.load();
   const drill = new Drill(cfg, state.level, state.stats);
@@ -47,6 +49,7 @@ function createSession(settings: Settings, onChange: () => void): Session {
     new Generator(words()),
     {
       intervalMs: settings.intervalMs,
+      upcomingWords: settings.upcomingWords,
       now: () => performance.now(),
       schedule: (fn, ms) => void setTimeout(fn, ms),
       onChange,
@@ -86,7 +89,12 @@ export function App() {
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "Escape") {
-        session.pause();
+        if (session.state === "paused" || session.state === "ready") {
+          // 停止中の Esc は設定を開く
+          openSettings();
+        } else {
+          session.pause();
+        }
         return;
       }
       const key = keyFromCode(e.code);
@@ -254,7 +262,7 @@ export function App() {
 }
 
 interface FieldSpec {
-  key: keyof Settings;
+  key: Exclude<keyof Settings, "requireBackspace">;
   label: string;
   note: string;
   min: number;
@@ -266,13 +274,13 @@ interface FieldSpec {
 }
 
 const FIELDS: FieldSpec[] = [
-  { key: "targetKPM", label: "目標打鍵速度 (kpm)", note: "昇格に必要な速度。制限時間にも使う", min: 30, max: 400, step: 5 },
+  { key: "targetKPM", label: "目標打鍵速度 (kpm)", note: "昇格に必要な速度", min: 30, max: 600, step: 5 },
   {
     key: "maxMissRate", label: "ミス率の上限 (%)", note: "これ以下なら昇格できる",
-    min: 0.5, max: 50, step: 0.5,
+    min: 0.1, max: 50, step: 0.1,
     toView: (v) => Math.round(v * 1000) / 10, fromView: (v) => v / 100,
   },
-  { key: "reactionBudgetMs", label: "反応の猶予 (ms)", note: "kpm の計算で経過時間から引く", min: 0, max: 3000, step: 50 },
+  { key: "upcomingWords", label: "先に見える単語数", note: "いま打つ単語の右に見える先読みの数", min: 0, max: 10, step: 1 },
   { key: "windowSize", label: "判定に使う単語数", note: "この窓の kpm とミス率で昇格を判定", min: 10, max: 500, step: 10 },
   { key: "minNewKanaWords", label: "新出かなの語数", note: "昇格までに打つ、新しいかなを含む語の回数", min: 0, max: 300, step: 5 },
   { key: "intervalMs", label: "単語間インターバル (ms)", note: "次の単語が出るまで入力を受け付けない時間", min: 0, max: 3000, step: 50 },
@@ -291,11 +299,24 @@ function SettingsPanel({
     const value = spec.fromView ? spec.fromView(viewValue) : viewValue;
     onChange(sanitize({ ...settings, [key]: value }));
   };
+  const activePreset = matchPreset(settings);
 
   return (
     <div class="overlay" onClick={onClose}>
       <div class="panel" onClick={(e) => e.stopPropagation()}>
         <h2>設定</h2>
+        <div class="presets">
+          {PRESETS.map((p) => (
+            <button
+              key={p.name}
+              class={`preset ${activePreset === p.name ? "active" : ""}`}
+              onClick={() => onChange({ ...p.settings })}
+            >
+              {p.name}
+            </button>
+          ))}
+          {activePreset === null && <span class="preset custom">カスタム</span>}
+        </div>
         {FIELDS.map((f) => (
           <label key={f.key} class="field">
             <span class="field-label">
@@ -314,10 +335,27 @@ function SettingsPanel({
             />
           </label>
         ))}
+        <label class="field">
+          <span class="field-label">
+            ミス時のバックスペース修正
+            <span class="field-note">
+              オンだとミスの後に BS (Uキー単打) で消すまで進めない
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={settings.requireBackspace}
+            onChange={(e) =>
+              onChange(
+                sanitize({
+                  ...settings,
+                  requireBackspace: (e.target as HTMLInputElement).checked,
+                }),
+              )
+            }
+          />
+        </label>
         <div class="panel-actions">
-          <button class="ghost" onClick={() => onChange({ ...DEFAULT_SETTINGS })}>
-            既定に戻す
-          </button>
           <button class="primary" onClick={onClose}>
             閉じる (Esc)
           </button>

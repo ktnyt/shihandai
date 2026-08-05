@@ -326,3 +326,37 @@ button.primary {
   font-size: 0.75rem;
   margin: 0;
 }
+
+.presets {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+button.preset {
+  background: var(--gauge-bg);
+  border: 1px solid transparent;
+  color: var(--fg);
+  border-radius: 1rem;
+  padding: 0.25rem 0.8rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+button.preset.active {
+  background: var(--blue);
+  color: #fff;
+}
+
+.preset.custom {
+  color: var(--yellow);
+  font-size: 0.85rem;
+  padding: 0.25rem 0.4rem;
+}
+
+.field input[type="checkbox"] {
+  width: 1.2rem;
+  height: 1.2rem;
+  accent-color: var(--blue);
+}

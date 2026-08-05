@@ -50,11 +50,32 @@ describe("Drill", () => {
     expect(d.finishWord(1000).success).toBe(false);
   });
 
-  it("kpm は反応の猶予を引いて計算する", () => {
+  it("kpm は表示から打ち終わりまでの素の時間で計算する", () => {
     const d = new Drill(cfgWith({}), 1);
-    // 「ある」= 2打鍵、経過1.5秒 - 猶予0.5秒 = 1秒 → 120kpm
-    typeWord(d, ["あ", "る"], 1500);
+    // 「ある」= 2打鍵、経過1秒 → 120kpm
+    typeWord(d, ["あ", "る"], 1000);
     expect(d.windowKPM()).toBeCloseTo(120);
+  });
+
+  it("修正必須モードではミスの後にBSを打つまで進めない", () => {
+    const d = new Drill(cfgWith({ requireBackspace: true }), 1);
+    d.startWord(["あ", "い"], 0);
+    expect(d.input("い")).toBe("error");
+    expect(d.needsBackspace()).toBe(true);
+    expect(d.input("あ")).toBe("blocked"); // 正しいかなでも進まない
+    expect(d.currentPos()).toBe(0);
+    expect(d.input("\b")).toBe("corrected");
+    expect(d.input("あ")).toBe("advance");
+    expect(d.input("い")).toBe("wordDone");
+    expect(d.finishWord(1000).success).toBe(false); // ミスは残る
+  });
+
+  it("修正不要モードではBSなしで打ち直せる", () => {
+    const d = new Drill(cfgWith({ requireBackspace: false }), 1);
+    d.startWord(["あ", "い"], 0);
+    expect(d.input("い")).toBe("error");
+    expect(d.needsBackspace()).toBe(false);
+    expect(d.input("あ")).toBe("advance");
   });
 
   it("kpm とミス率の両方を満たすと昇格しカウンターが空になる", () => {

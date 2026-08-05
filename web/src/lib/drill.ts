@@ -24,9 +24,9 @@ export function recentAccuracy(s: UnitStat): number {
 export interface DrillConfig {
   targetKPM: number; // 昇格に必要な打鍵速度 (keys per minute)
   maxMissRate: number; // 昇格できるミス率の上限
-  reactionBudgetMs: number; // 表示から打ち始めるまでの猶予。kpm の計算で引く
   windowSize: number; // 判定に使う直近の単語数
   minNewKanaWords: number; // 昇格までに打つ、新出かなを含む語の最低数
+  requireBackspace: boolean; // ミス時にバックスペース修正が必要か
   demoteAccuracy: number; // これを下回ると降格するかなの直近正答率
   minAttempts: number; // 降格判定に必要な直近試行数
 }
@@ -34,9 +34,9 @@ export interface DrillConfig {
 export const DEFAULT_DRILL_CONFIG: DrillConfig = {
   targetKPM: 120,
   maxMissRate: 0.05,
-  reactionBudgetMs: 500,
   windowSize: 100,
   minNewKanaWords: 50,
+  requireBackspace: false,
   demoteAccuracy: 0.7,
   minAttempts: RECENT_WINDOW,
 };
@@ -46,10 +46,16 @@ export interface WordRecord {
   units: number; // 正しく打ったかなの数
   keys: number; // 打鍵数 (同時押しは複数と数える)
   errors: number; // ミス入力の数
-  typingMs: number; // 反応の猶予を引いた打鍵時間
+  typingMs: number; // 表示から打ち終わるまでの時間
 }
 
-export type InputResult = "ignored" | "advance" | "error" | "wordDone";
+export type InputResult =
+  | "ignored"
+  | "advance"
+  | "error"
+  | "wordDone"
+  | "blocked" // バックスペース修正待ちの間のかな入力
+  | "corrected"; // バックスペースで修正した
 
 export interface WordResult {
   success: boolean;
@@ -71,6 +77,7 @@ export class Drill {
   private word: string[] = [];
   private pos = 0;
   private wordErrors = 0;
+  private pendingError = false; // バックスペース修正待ち
   private shownAt: number | null = null;
   private records: WordRecord[] = [];
   private newKanaWordCount = 0;
@@ -131,6 +138,7 @@ export class Drill {
     this.word = units;
     this.pos = 0;
     this.wordErrors = 0;
+    this.pendingError = false;
     this.shownAt = nowMs;
   }
 
@@ -150,6 +158,11 @@ export class Drill {
     return this.pos < this.word.length ? this.word[this.pos] : "";
   }
 
+  // バックスペース修正待ちかどうか。
+  needsBackspace(): boolean {
+    return this.pendingError;
+  }
+
   elapsedMs(nowMs: number): number {
     return this.shownAt === null ? 0 : nowMs - this.shownAt;
   }
@@ -165,6 +178,17 @@ export class Drill {
 
   input(text: string): InputResult {
     if (this.pos >= this.word.length) return "ignored";
+
+    // 修正必須モードでは、ミスの後にバックスペースを打つまで進めない
+    if (this.pendingError) {
+      if (text === "\b") {
+        this.pendingError = false;
+        return "corrected";
+      }
+      if (text === " " || text === "\n" || text === "") return "ignored";
+      return "blocked";
+    }
+
     if (text === " " || text === "\b" || text === "\n" || text === "") {
       return "ignored";
     }
@@ -176,6 +200,9 @@ export class Drill {
     }
     this.record(expected, false);
     this.wordErrors++;
+    if (this.cfg.requireBackspace) {
+      this.pendingError = true;
+    }
     return "error";
   }
 
@@ -206,7 +233,7 @@ export class Drill {
   }
 
   // 直近の窓の打鍵速度 (keys per minute)。
-  // 各単語の経過時間から反応の猶予を引いた分を打鍵時間とみなす。
+  // 表示から打ち終わるまでの素の時間で計算する。
   windowKPM(): number {
     let keys = 0;
     let typingMs = 0;
@@ -241,8 +268,8 @@ export class Drill {
       weakUnit: "",
     };
 
-    // 反応の猶予より速く打ち終えた語で速度が発散しないよう下限を置く
-    const typingMs = Math.max(out.durationMs - this.cfg.reactionBudgetMs, 10);
+    // 一瞬で打ち終えた語で速度が発散しないよう下限を置く
+    const typingMs = Math.max(out.durationMs, 10);
     this.records.push({
       success: out.success,
       units: this.word.length,

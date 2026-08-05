@@ -13,11 +13,9 @@ export type SessionState =
   | "paused"
   | "leveledUp";
 
-// 先読みしておく単語の数。
-const QUEUE_LEN = 4;
-
 export interface SessionOptions {
   intervalMs: number; // 単語と単語の間の入力を受け付けない時間
+  upcomingWords: number; // 先に見える単語の数
   now: () => number;
   schedule: (fn: () => void, ms: number) => void;
   onChange: () => void;
@@ -32,6 +30,7 @@ export class Session {
   flash = "";
   lastResult: WordResult | null = null;
   intervalMs: number; // 設定から変えられるよう公開する
+  upcomingWords: number; // 同上
 
   private queueLevel = 0;
   private waitToken = 0;
@@ -43,6 +42,7 @@ export class Session {
     private opts: SessionOptions,
   ) {
     this.intervalMs = opts.intervalMs;
+    this.upcomingWords = opts.upcomingWords;
     this.newWord(opts.now());
   }
 
@@ -108,7 +108,15 @@ export class Session {
           this.flash = "";
           break;
         case "error":
-          this.flash = `ミス: ${printable(em.text)}`;
+          this.flash = this.drill.needsBackspace()
+            ? `ミス: ${printable(em.text)} (BSで消してから打ち直す)`
+            : `ミス: ${printable(em.text)}`;
+          break;
+        case "corrected":
+          this.flash = "";
+          break;
+        case "blocked":
+          // 修正待ちのまま。フラッシュは出したままにする
           break;
         case "wordDone": {
           const out = this.drill.finishWord(now);
@@ -164,7 +172,8 @@ export class Session {
   }
 
   private fillQueue(): void {
-    while (this.upcoming.length < QUEUE_LEN) {
+    this.upcoming = this.upcoming.slice(0, Math.max(this.upcomingWords, 0));
+    while (this.upcoming.length < this.upcomingWords) {
       this.upcoming.push(
         this.gen.word(
           this.drill.allowed(),

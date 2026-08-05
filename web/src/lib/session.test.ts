@@ -23,6 +23,7 @@ function makeSession() {
     new Generator(words(), undefined, seededRandom(1)),
     {
       intervalMs: 0,
+      upcomingWords: 4,
       now: () => clock.t,
       schedule: () => {},
       onChange: () => {},
@@ -67,5 +68,17 @@ describe("Session", () => {
     const { session } = makeSession();
     session.pause();
     expect(session.state).toBe("ready");
+  });
+});
+
+describe("upcomingWords", () => {
+  it("先読みの数が設定に追従する", () => {
+    const { session } = makeSession();
+    expect(session.upcoming.length).toBe(4);
+
+    session.upcomingWords = 2;
+    session.start();
+    typeCurrentWord(session); // 次の単語で詰め直される
+    expect(session.upcoming.length).toBe(2);
   });
 });
