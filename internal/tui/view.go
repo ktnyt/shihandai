@@ -24,8 +24,24 @@ var (
 	styleHint    = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "94", Dark: "220"})
 )
 
-// View は画面を描画する。
+// View は画面を描画する。中身を組み立てて端末の中央に置く。
 func (m Model) View() string {
+	content := m.content()
+	if m.width > 0 && m.height > 0 {
+		// 幅を固定したブロックごと中央に置くと、行の長さが変わっても
+		// 位置がぶれない
+		block := lipgloss.NewStyle().Width(m.contentWidth()).Render(content)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, block)
+	}
+	return content
+}
+
+// contentWidth は画面中身の固定幅を返す。
+func (m Model) contentWidth() int {
+	return min(max(m.width-4, 40), 72)
+}
+
+func (m Model) content() string {
 	if m.err != nil {
 		return "エラー: " + m.err.Error() + "\n"
 	}
@@ -43,7 +59,7 @@ func (m Model) View() string {
 
 	fmt.Fprintf(&b, "%s %s\n\n",
 		styleFaint.Render("使えるかな:"),
-		wrapKana(allowed, max(m.width-8, 40)))
+		wrapKana(allowed, max(m.contentWidth()-12, 28)))
 
 	if m.leveledUp {
 		fmt.Fprintf(&b, "  %s\n\n", styleNotice.Render(fmt.Sprintf("レベルアップ! レベル %d", m.drill.Level)))
@@ -123,16 +139,23 @@ func (m Model) View() string {
 		styleFaint.Render(fmt.Sprintf("「%s」を含む語 %d/%d",
 			newest, m.drill.NewKanaWords(), m.drill.GateTarget())))
 
+	// 中央寄せしたときに縦位置がぶれないよう、空でも行を確保する
+	flash := ""
 	if m.flash != "" {
-		b.WriteString("  " + styleError.Render(m.flash) + "\n")
+		flash = styleError.Render(m.flash)
 	}
+	b.WriteString("  " + flash + "\n")
+	message := ""
 	if m.message != "" {
-		b.WriteString("  " + styleNotice.Render(m.message) + "\n")
+		message = styleNotice.Render(m.message)
 	}
+	b.WriteString("  " + message + "\n")
 
-	if weak := m.weakLabel(3); weak != "" {
-		b.WriteString("\n" + styleFaint.Render("にがて: "+weak) + "\n")
+	weak := ""
+	if label := m.weakLabel(3); label != "" {
+		weak = styleFaint.Render("にがて: " + label)
 	}
+	b.WriteString("\n" + weak + "\n")
 	return b.String()
 }
 

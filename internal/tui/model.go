@@ -27,6 +27,7 @@ type Model struct {
 	leveledUp bool // レベルアップ画面を表示中
 	kanaAdded bool // 直近の昇格でかなが増えた（false なら長さの解放）
 	width     int
+	height    int
 	message   string
 	flash     string
 	err       error
@@ -62,6 +63,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 		return m, nil
 
 	case tea.KeyMsg:

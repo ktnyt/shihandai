@@ -320,3 +320,28 @@ func TestLevelUpScreenShowsNewKana(t *testing.T) {
 		}
 	}
 }
+
+func TestViewCentersInTerminal(t *testing.T) {
+	m := newTestModel(t)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = next.(Model)
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) != 40 {
+		t.Fatalf("画面の行数 = %d, want 40 (端末の高さいっぱいに配置)", len(lines))
+	}
+	// 上下に余白ができ、本文は先頭行より下から始まる
+	if strings.TrimSpace(lines[0]) != "" {
+		t.Errorf("最上段に本文がある (縦中央になっていない):\n%s", view)
+	}
+	if !strings.Contains(view, "使えるかな") {
+		t.Errorf("本文が描画されていない:\n%s", view)
+	}
+	// 本文の行は左端から始まらない (横中央になっている)
+	for _, line := range lines {
+		if strings.Contains(line, "使えるかな") && !strings.HasPrefix(line, " ") {
+			t.Errorf("本文が左端に張り付いている: %q", line)
+		}
+	}
+}
