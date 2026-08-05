@@ -109,14 +109,14 @@ func TestPromoteWhenBothThresholdsMet(t *testing.T) {
 	cfg.MinNewKanaWords = 10
 	d := New(cfg, 1, nil)
 
-	// 「ある」は2打鍵。1.5秒 (打鍵時間0.5秒 → 4kps) でノーミスなら
-	// kps もミス率も基準を満たす
+	// 「ある」は2打鍵。1.5秒 (打鍵時間0.5秒 → 240kpm) でノーミスなら
+	// kpm もミス率も基準を満たす
 	var out WordResult
 	for range cfg.WindowSize {
 		out = typeWord(d, []string{"あ", "る"}, 1500*time.Millisecond)
 	}
 	if !out.Promoted {
-		t.Fatalf("昇格しなかった: %+v (kps=%.2f miss=%.2f)", out, d.WindowKPS(), d.MissRate())
+		t.Fatalf("昇格しなかった: %+v (kpm=%.0f miss=%.2f)", out, d.WindowKPM(), d.MissRate())
 	}
 	if out.KanaAdded {
 		t.Errorf("レベル1→2はかな追加ではなく長さの解放のはず: %+v", out)
@@ -138,14 +138,14 @@ func TestNoPromoteWhenKPSTooLow(t *testing.T) {
 	cfg.MinNewKanaWords = 0
 	d := New(cfg, 1, nil)
 
-	// 3秒 (打鍵時間2秒 → 2打鍵で 1kps) はノーミスでも遅すぎる
+	// 3秒 (打鍵時間2秒 → 2打鍵で 60kpm) はノーミスでも遅すぎる
 	for range cfg.WindowSize * 2 {
 		if out := typeWord(d, []string{"あ", "る"}, 3*time.Second); out.Promoted {
-			t.Fatal("kps 不足なのに昇格した")
+			t.Fatal("kpm 不足なのに昇格した")
 		}
 	}
-	if got := d.WindowKPS(); got >= cfg.TargetKPS {
-		t.Fatalf("前提が崩れた: WindowKPS = %.2f", got)
+	if got := d.WindowKPM(); got >= cfg.TargetKPM {
+		t.Fatalf("前提が崩れた: WindowKPM = %.0f", got)
 	}
 
 	// 速い語で窓が入れ替われば昇格する
@@ -157,7 +157,7 @@ func TestNoPromoteWhenKPSTooLow(t *testing.T) {
 		}
 	}
 	if !promoted {
-		t.Fatalf("速くなったのに昇格しない: kps=%.2f", d.WindowKPS())
+		t.Fatalf("速くなったのに昇格しない: kpm=%.0f", d.WindowKPM())
 	}
 }
 
@@ -403,18 +403,18 @@ func TestProgressRoundtrip(t *testing.T) {
 	if successes, total := d.SuccessCount(); total != 5 || successes != 4 {
 		t.Errorf("SuccessCount = %d/%d, want 4/5", successes, total)
 	}
-	if got := d.WindowKPS(); got != 2 {
-		t.Errorf("WindowKPS = %.2f, want 2 (2打鍵/1秒 × 5語)", got)
+	if got := d.WindowKPM(); got != 120 {
+		t.Errorf("WindowKPM = %.0f, want 120 (2打鍵/1秒 × 5語)", got)
 	}
 }
 
-func TestWindowKPSSubtractsReaction(t *testing.T) {
+func TestWindowKPMSubtractsReaction(t *testing.T) {
 	cfg := DefaultConfig()
 	d := New(cfg, 1, nil)
 
 	// 経過2秒のうち反応の猶予1秒を引いた1秒が打鍵時間になる
 	typeWord(d, []string{"あ", "る"}, 2*time.Second)
-	if got := d.WindowKPS(); got != 2 {
-		t.Errorf("WindowKPS = %.2f, want 2 (2打鍵/(2s-1s))", got)
+	if got := d.WindowKPM(); got != 120 {
+		t.Errorf("WindowKPM = %.0f, want 120 (2打鍵/(2s-1s))", got)
 	}
 }

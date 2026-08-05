@@ -1,7 +1,7 @@
 // Package drill は練習セッションの進行と昇格・降格の判定を行う。
 //
 // 出題は1単語ずつ。単語が表示された瞬間から打ち終わるまでを計測する。
-// 昇格は直近の窓の打鍵速度 (kps) とミス率の両方が基準を満たしたとき。
+// 昇格は直近の窓の打鍵速度 (kpm) とミス率の両方が基準を満たしたとき。
 // 並行安全ではない。
 package drill
 
@@ -50,7 +50,7 @@ func (s *UnitStat) RecentAccuracy() float64 {
 
 // Config は判定の調整項目。
 type Config struct {
-	TargetKPS       float64       // 昇格に必要な打鍵速度 (keys per second)
+	TargetKPM       float64       // 昇格に必要な打鍵速度 (keys per minute)
 	MaxMissRate     float64       // 昇格できるミス率の上限
 	ReactionBudget  time.Duration // 表示から打ち始めるまでの猶予
 	WindowSize      int           // 判定に使う直近の単語数
@@ -65,7 +65,7 @@ type Config struct {
 // はじめて降格する。
 func DefaultConfig() Config {
 	return Config{
-		TargetKPS:       2.0, // 120kpm 相当
+		TargetKPM:       120,
 		MaxMissRate:     0.05,
 		ReactionBudget:  time.Second,
 		WindowSize:      100,
@@ -195,7 +195,7 @@ func (d *Drill) Elapsed(now time.Time) time.Duration {
 // Threshold は現在の単語を成功とみなす制限時間を返す。
 // 反応の猶予に、打鍵数ぶんの時間を目標打鍵速度で換算して足す。
 func (d *Drill) Threshold() time.Duration {
-	typing := time.Duration(float64(d.wordKeys()) / d.Cfg.TargetKPS * float64(time.Second))
+	typing := time.Duration(float64(d.wordKeys()) / d.Cfg.TargetKPM * float64(time.Minute))
 	return d.Cfg.ReactionBudget + typing
 }
 
@@ -270,9 +270,9 @@ func (d *Drill) SuccessCount() (successes, total int) {
 	return successes, len(d.records)
 }
 
-// WindowKPS は直近の窓の打鍵速度 (keys per second) を返す。
+// WindowKPM は直近の窓の打鍵速度 (keys per minute) を返す。
 // 各単語の経過時間から反応の猶予を引いた分を打鍵時間とみなす。
-func (d *Drill) WindowKPS() float64 {
+func (d *Drill) WindowKPM() float64 {
 	keys := 0
 	var typing time.Duration
 	for _, r := range d.records {
@@ -282,7 +282,7 @@ func (d *Drill) WindowKPS() float64 {
 	if typing <= 0 {
 		return 0
 	}
-	return float64(keys) / typing.Seconds()
+	return float64(keys) / typing.Minutes()
 }
 
 // MissRate は直近の窓のミス率を返す。
@@ -362,7 +362,7 @@ func (d *Drill) FinishWord(now time.Time) WordResult {
 	// 窓が埋まっていて、打鍵速度とミス率の両方が基準を満たし、
 	// 新出かなを含む語も十分に打っていたらレベルアップ
 	if len(d.records) >= d.Cfg.WindowSize &&
-		d.WindowKPS() >= d.Cfg.TargetKPS &&
+		d.WindowKPM() >= d.Cfg.TargetKPM &&
 		d.MissRate() <= d.Cfg.MaxMissRate &&
 		d.newKanaWords >= d.GateTarget() &&
 		d.Level < curriculum.MaxLevel() {

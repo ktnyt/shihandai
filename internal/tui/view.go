@@ -131,10 +131,10 @@ func (m Model) content() string {
 
 	successes, total := m.drill.SuccessCount()
 	b.WriteString("  " + m.progressBar(successes, total-successes) + "\n")
-	kps := m.drill.WindowKPS()
+	kpm := m.drill.WindowKPM()
 	missRate := m.drill.MissRate()
-	fmt.Fprintf(&b, "  kps %.2f/%.2f  ミス率 %.1f%%/%.1f%%  直近 %d/%d 語 (両方みたすとレベルアップ)\n",
-		kps, m.drill.Cfg.TargetKPS,
+	fmt.Fprintf(&b, "  kpm %.0f/%.0f  ミス率 %.1f%%/%.1f%%  直近 %d/%d 語 (両方みたすとレベルアップ)\n",
+		kpm, m.drill.Cfg.TargetKPM,
 		missRate*100, m.drill.Cfg.MaxMissRate*100,
 		total, m.drill.Cfg.WindowSize)
 	fmt.Fprintf(&b, "  %s\n",
