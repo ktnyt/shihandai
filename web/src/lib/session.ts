@@ -26,6 +26,7 @@ export class Session {
   message = "";
   flash = "";
   lastResult: WordResult | null = null;
+  intervalMs: number; // 設定から変えられるよう公開する
 
   private queueLevel = 0;
   private waitToken = 0;
@@ -36,6 +37,7 @@ export class Session {
     private gen: Generator,
     private opts: SessionOptions,
   ) {
+    this.intervalMs = opts.intervalMs;
     this.newWord(opts.now());
   }
 
@@ -105,7 +107,7 @@ export class Session {
             this.engine.reset();
             return;
           }
-          if (this.opts.intervalMs > 0) {
+          if (this.intervalMs > 0) {
             // 打ち終わりの巻き込みを防ぐため、少し置いてから次を出す
             this.state = "waiting";
             this.engine.reset();
@@ -116,7 +118,7 @@ export class Session {
                 this.newWord(this.opts.now());
                 this.opts.onChange();
               }
-            }, this.opts.intervalMs);
+            }, this.intervalMs);
             return;
           }
           this.newWord(now);

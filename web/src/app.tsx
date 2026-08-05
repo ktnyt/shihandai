@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer } from "preact/hooks";
+import { useEffect, useMemo, useReducer, useState } from "preact/hooks";
 import { Engine } from "./lib/engine";
 import { Drill, DEFAULT_DRILL_CONFIG, recentAccuracy } from "./lib/drill";
 import { Generator } from "./lib/lesson";
@@ -8,17 +8,34 @@ import { chordFor } from "./lib/table";
 import { chordLabel, keyFromCode, KeySpace } from "./lib/keys";
 import { groupOf, maxLevel } from "./lib/curriculum";
 import * as store from "./lib/store";
+import {
+  DEFAULT_SETTINGS,
+  loadSettings,
+  sanitize,
+  saveSettings,
+  type Settings,
+} from "./lib/settings";
 
 const KPM_METER_MAX = 180;
-const INTERVAL_MS = 500;
 
-function createSession(onChange: () => void): Session {
-  const params = new URLSearchParams(location.search);
+// 設定を練習中のセッションに反映する。
+function applySettings(session: Session, s: Settings): void {
+  const cfg = session.drill.cfg;
+  cfg.targetKPM = s.targetKPM;
+  cfg.maxMissRate = s.maxMissRate;
+  cfg.reactionBudgetMs = s.reactionBudgetMs;
+  cfg.windowSize = s.windowSize;
+  cfg.minNewKanaWords = s.minNewKanaWords;
+  session.intervalMs = s.intervalMs;
+}
+
+function createSession(settings: Settings, onChange: () => void): Session {
   const cfg = { ...DEFAULT_DRILL_CONFIG };
-  const kpm = Number(params.get("kpm"));
-  if (kpm > 0) cfg.targetKPM = kpm;
-  const missRate = Number(params.get("missrate"));
-  if (missRate > 0) cfg.maxMissRate = missRate;
+  cfg.targetKPM = settings.targetKPM;
+  cfg.maxMissRate = settings.maxMissRate;
+  cfg.reactionBudgetMs = settings.reactionBudgetMs;
+  cfg.windowSize = settings.windowSize;
+  cfg.minNewKanaWords = settings.minNewKanaWords;
 
   const state = store.load();
   const drill = new Drill(cfg, state.level, state.stats);
@@ -29,7 +46,7 @@ function createSession(onChange: () => void): Session {
     drill,
     new Generator(words()),
     {
-      intervalMs: INTERVAL_MS,
+      intervalMs: settings.intervalMs,
       now: () => performance.now(),
       schedule: (fn, ms) => void setTimeout(fn, ms),
       onChange,
@@ -44,11 +61,29 @@ function createSession(onChange: () => void): Session {
 
 export function App() {
   const [, bump] = useReducer((x: number) => x + 1, 0);
-  const session = useMemo(() => createSession(() => bump(0)), []);
+  const [settings, setSettings] = useState(() => loadSettings());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const session = useMemo(() => createSession(loadSettings(), () => bump(0)), []);
   const drill = session.drill;
+
+  const openSettings = () => {
+    session.pause();
+    setSettingsOpen(true);
+  };
+  const closeSettings = () => setSettingsOpen(false);
+  const changeSettings = (next: Settings) => {
+    setSettings(next);
+    saveSettings(next);
+    applySettings(session, next);
+    bump(0);
+  };
 
   useEffect(() => {
     const onKeydown = (e: KeyboardEvent) => {
+      if (settingsOpen) {
+        if (e.key === "Escape") setSettingsOpen(false);
+        return; // パネルの入力を邪魔しない
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "Escape") {
         session.pause();
@@ -83,7 +118,7 @@ export function App() {
       window.removeEventListener("keyup", onKeyup);
       window.removeEventListener("blur", onBlur);
     };
-  }, [session]);
+  }, [session, settingsOpen]);
 
   // 経過時間の表示を進めるための再描画
   useEffect(() => {
@@ -193,11 +228,101 @@ export function App() {
         <span class="faint">
           Esc で一時停止・IMEはオフ (直接入力) にして使う
         </span>
-        <button class="reset" onClick={onReset}>
-          進捗リセット
-        </button>
+        <span class="footer-buttons">
+          <button class="ghost" onClick={openSettings}>
+            設定
+          </button>
+          <button class="ghost danger" onClick={onReset}>
+            進捗リセット
+          </button>
+        </span>
       </footer>
+
+      {settingsOpen && (
+        <SettingsPanel
+          settings={settings}
+          onChange={changeSettings}
+          onClose={closeSettings}
+        />
+      )}
     </main>
+  );
+}
+
+interface FieldSpec {
+  key: keyof Settings;
+  label: string;
+  note: string;
+  min: number;
+  max: number;
+  step: number;
+  // 表示値と内部値の変換 (ミス率は%で見せる)
+  toView?: (v: number) => number;
+  fromView?: (v: number) => number;
+}
+
+const FIELDS: FieldSpec[] = [
+  { key: "targetKPM", label: "目標打鍵速度 (kpm)", note: "昇格に必要な速度。制限時間にも使う", min: 30, max: 400, step: 5 },
+  {
+    key: "maxMissRate", label: "ミス率の上限 (%)", note: "これ以下なら昇格できる",
+    min: 0.5, max: 50, step: 0.5,
+    toView: (v) => Math.round(v * 1000) / 10, fromView: (v) => v / 100,
+  },
+  { key: "reactionBudgetMs", label: "反応の猶予 (ms)", note: "kpm の計算で経過時間から引く", min: 0, max: 3000, step: 50 },
+  { key: "windowSize", label: "判定に使う単語数", note: "この窓の kpm とミス率で昇格を判定", min: 10, max: 500, step: 10 },
+  { key: "minNewKanaWords", label: "新出かなの語数", note: "昇格までに打つ、新しいかなを含む語の回数", min: 0, max: 300, step: 5 },
+  { key: "intervalMs", label: "単語間インターバル (ms)", note: "次の単語が出るまで入力を受け付けない時間", min: 0, max: 3000, step: 50 },
+];
+
+function SettingsPanel({
+  settings,
+  onChange,
+  onClose,
+}: {
+  settings: Settings;
+  onChange: (s: Settings) => void;
+  onClose: () => void;
+}) {
+  const update = (key: keyof Settings, viewValue: number, spec: FieldSpec) => {
+    const value = spec.fromView ? spec.fromView(viewValue) : viewValue;
+    onChange(sanitize({ ...settings, [key]: value }));
+  };
+
+  return (
+    <div class="overlay" onClick={onClose}>
+      <div class="panel" onClick={(e) => e.stopPropagation()}>
+        <h2>設定</h2>
+        {FIELDS.map((f) => (
+          <label key={f.key} class="field">
+            <span class="field-label">
+              {f.label}
+              <span class="field-note">{f.note}</span>
+            </span>
+            <input
+              type="number"
+              min={f.min}
+              max={f.max}
+              step={f.step}
+              value={f.toView ? f.toView(settings[f.key]) : settings[f.key]}
+              onChange={(e) =>
+                update(f.key, Number((e.target as HTMLInputElement).value), f)
+              }
+            />
+          </label>
+        ))}
+        <div class="panel-actions">
+          <button class="ghost" onClick={() => onChange({ ...DEFAULT_SETTINGS })}>
+            既定に戻す
+          </button>
+          <button class="primary" onClick={onClose}>
+            閉じる (Esc)
+          </button>
+        </div>
+        <p class="faint small">
+          変更はすぐ保存され、この端末の次回起動にも引き継がれます。
+        </p>
+      </div>
+    </div>
   );
 }
 
