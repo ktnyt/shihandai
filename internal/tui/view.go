@@ -131,13 +131,12 @@ func (m Model) content() string {
 
 	successes, total := m.drill.SuccessCount()
 	b.WriteString("  " + m.progressBar(successes, total-successes) + "\n")
-	rate := "-"
-	if total > 0 {
-		rate = fmt.Sprintf("%.0f%%", float64(successes)/float64(total)*100)
-	}
-	fmt.Fprintf(&b, "  直近 %d/%d 語 成功率 %s  (%d 語で %.0f%% を超えたらレベルアップ)\n",
-		successes, total, rate,
-		m.drill.Cfg.WindowSize, m.drill.Cfg.PromoteRate*100)
+	kps := m.drill.WindowKPS()
+	missRate := m.drill.MissRate()
+	fmt.Fprintf(&b, "  kps %.2f/%.2f  ミス率 %.1f%%/%.1f%%  直近 %d/%d 語 (両方みたすとレベルアップ)\n",
+		kps, m.drill.Cfg.TargetKPS,
+		missRate*100, m.drill.Cfg.MaxMissRate*100,
+		total, m.drill.Cfg.WindowSize)
 	fmt.Fprintf(&b, "  %s\n",
 		styleFaint.Render(fmt.Sprintf("「%s」を含む語 %d/%d",
 			newest, m.drill.NewKanaWords(), m.drill.GateTarget())))

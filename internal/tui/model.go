@@ -233,7 +233,7 @@ func resultMessage(out drill.WordResult) string {
 	case out.Demoted:
 		return fmt.Sprintf("「%s」の正答率が下がったのでレベルダウン", out.WeakUnit)
 	case out.Promoted:
-		return "成功率が基準を超えた! 新しいかなを追加"
+		return "速度とミス率が基準をみたした! レベルアップ"
 	case out.Success:
 		return fmt.Sprintf("成功 %.1fs / %.1fs", out.Duration.Seconds(), out.Threshold.Seconds())
 	case out.Errors > 0:
@@ -250,11 +250,11 @@ func (m *Model) save() tea.Cmd {
 	if m.statePath == "" {
 		return nil
 	}
-	results, newKanaWords := m.drill.Progress()
+	records, newKanaWords := m.drill.Progress()
 	data, err := store.Encode(store.State{
 		Level:        m.drill.Level,
 		Stats:        m.drill.Stats,
-		Results:      results,
+		Records:      records,
 		NewKanaWords: newKanaWords,
 	})
 	if err != nil {

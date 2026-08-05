@@ -70,7 +70,7 @@ func TestNewStartsWithTypableWord(t *testing.T) {
 	}
 
 	view := m.View()
-	for _, want := range []string{"使えるかな", "つぎ", "成功率", "レベルアップ"} {
+	for _, want := range []string{"使えるかな", "つぎ", "kps", "ミス率", "レベルアップ"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("表示に %q がない:\n%s", want, view)
 		}
@@ -233,7 +233,7 @@ func TestEscPausesAndHidesWord(t *testing.T) {
 		t.Errorf("伏せ字が出ていない:\n%s", view)
 	}
 	// 統計は見えたまま、行数も変わらない（レイアウトがずれない）
-	for _, want := range []string{"成功率", "レベルアップ", "ミス"} {
+	for _, want := range []string{"kps", "ミス率", "レベルアップ"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("一時停止中に %q が消えている:\n%s", want, view)
 		}

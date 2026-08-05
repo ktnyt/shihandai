@@ -1,8 +1,8 @@
 // Package drill は練習セッションの進行と昇格・降格の判定を行う。
 //
-// 出題は1単語ずつ。単語が表示された瞬間から打ち終わるまでを計測し、
-// ノーミスかつしきい値時間内なら成功と数える。直近の成功率が基準を
-// 超えたらレベルアップする。並行安全ではない。
+// 出題は1単語ずつ。単語が表示された瞬間から打ち終わるまでを計測する。
+// 昇格は直近の窓の打鍵速度 (kps) とミス率の両方が基準を満たしたとき。
+// 並行安全ではない。
 package drill
 
 import (
@@ -50,10 +50,10 @@ func (s *UnitStat) RecentAccuracy() float64 {
 
 // Config は判定の調整項目。
 type Config struct {
-	TargetKPM       float64       // 目標打鍵速度。しきい値時間の計算に使う
+	TargetKPS       float64       // 昇格に必要な打鍵速度 (keys per second)
+	MaxMissRate     float64       // 昇格できるミス率の上限
 	ReactionBudget  time.Duration // 表示から打ち始めるまでの猶予
-	WindowSize      int           // 成功率を測る直近の単語数
-	PromoteRate     float64       // これを上回ったらレベルアップする成功率
+	WindowSize      int           // 判定に使う直近の単語数
 	MinNewKanaWords int           // 昇格までに打つ、新出かなを含む語の最低数
 	DemoteAccuracy  float64       // これを下回ると降格するかなの直近正答率
 	MinAttempts     int           // 降格判定に必要な直近試行数
@@ -65,14 +65,23 @@ type Config struct {
 // はじめて降格する。
 func DefaultConfig() Config {
 	return Config{
-		TargetKPM:       120,
+		TargetKPS:       2.0, // 120kpm 相当
+		MaxMissRate:     0.05,
 		ReactionBudget:  time.Second,
 		WindowSize:      100,
-		PromoteRate:     0.95,
 		MinNewKanaWords: 50,
 		DemoteAccuracy:  0.70,
 		MinAttempts:     recentWindow,
 	}
+}
+
+// WordRecord は判定の窓に残る、1単語分の記録。
+type WordRecord struct {
+	Success bool          `json:"success"`
+	Units   int           `json:"units"`  // 正しく打ったかなの数
+	Keys    int           `json:"keys"`   // 打鍵数 (同時押しは複数と数える)
+	Errors  int           `json:"errors"` // ミス入力の数
+	Typing  time.Duration `json:"typing"` // 反応の猶予を引いた打鍵時間
 }
 
 // Drill は練習全体の状態。
@@ -85,9 +94,9 @@ type Drill struct {
 	pos           int
 	wordErrors    int
 	shownAt       time.Time
-	results       []bool // 直近 WindowSize 単語の成否
-	newKanaWords  int    // このレベルで打った、新出かなを含む語の数
-	newKanaSupply int    // 新出かなを含む語が辞書に何語あるか。負なら不明
+	records       []WordRecord // 直近 WindowSize 単語の記録
+	newKanaWords  int          // このレベルで打った、新出かなを含む語の数
+	newKanaSupply int          // 新出かなを含む語が辞書に何語あるか。負なら不明
 }
 
 // New は練習状態を作る。
@@ -136,17 +145,17 @@ func (d *Drill) GateTarget() int {
 	return target
 }
 
-// Progress は保存のために成功率の窓とゲートのカウンタを返す。
-func (d *Drill) Progress() (results []bool, newKanaWords int) {
-	return d.results, d.newKanaWords
+// Progress は保存のために判定の窓とゲートのカウンタを返す。
+func (d *Drill) Progress() (records []WordRecord, newKanaWords int) {
+	return d.records, d.newKanaWords
 }
 
 // SetProgress は保存されていた進捗を復元する。
-func (d *Drill) SetProgress(results []bool, newKanaWords int) {
-	if len(results) > d.Cfg.WindowSize {
-		results = results[len(results)-d.Cfg.WindowSize:]
+func (d *Drill) SetProgress(records []WordRecord, newKanaWords int) {
+	if len(records) > d.Cfg.WindowSize {
+		records = records[len(records)-d.Cfg.WindowSize:]
 	}
-	d.results = results
+	d.records = records
 	d.newKanaWords = max(newKanaWords, 0)
 }
 
@@ -186,6 +195,12 @@ func (d *Drill) Elapsed(now time.Time) time.Duration {
 // Threshold は現在の単語を成功とみなす制限時間を返す。
 // 反応の猶予に、打鍵数ぶんの時間を目標打鍵速度で換算して足す。
 func (d *Drill) Threshold() time.Duration {
+	typing := time.Duration(float64(d.wordKeys()) / d.Cfg.TargetKPS * float64(time.Second))
+	return d.Cfg.ReactionBudget + typing
+}
+
+// wordKeys は現在の単語の打鍵数を返す。
+func (d *Drill) wordKeys() int {
 	keys := 0
 	for _, u := range d.word {
 		if chord, ok := naginata.ChordFor(u); ok {
@@ -194,8 +209,7 @@ func (d *Drill) Threshold() time.Duration {
 			keys++
 		}
 	}
-	typing := time.Duration(float64(keys) / d.Cfg.TargetKPM * float64(time.Minute))
-	return d.Cfg.ReactionBudget + typing
+	return keys
 }
 
 // Result は1回の入力の判定結果。
@@ -248,12 +262,41 @@ func (d *Drill) stat(unit string) *UnitStat {
 
 // SuccessCount は直近の成功数と試行数を返す。
 func (d *Drill) SuccessCount() (successes, total int) {
-	for _, ok := range d.results {
-		if ok {
+	for _, r := range d.records {
+		if r.Success {
 			successes++
 		}
 	}
-	return successes, len(d.results)
+	return successes, len(d.records)
+}
+
+// WindowKPS は直近の窓の打鍵速度 (keys per second) を返す。
+// 各単語の経過時間から反応の猶予を引いた分を打鍵時間とみなす。
+func (d *Drill) WindowKPS() float64 {
+	keys := 0
+	var typing time.Duration
+	for _, r := range d.records {
+		keys += r.Keys
+		typing += r.Typing
+	}
+	if typing <= 0 {
+		return 0
+	}
+	return float64(keys) / typing.Seconds()
+}
+
+// MissRate は直近の窓のミス率を返す。
+// 打ったかな (正解とミスの合計) のうちミスの割合。
+func (d *Drill) MissRate() float64 {
+	units, errors := 0, 0
+	for _, r := range d.records {
+		units += r.Units
+		errors += r.Errors
+	}
+	if units+errors == 0 {
+		return 0
+	}
+	return float64(errors) / float64(units+errors)
 }
 
 // WordResult は単語を打ち終えたときの判定。
@@ -279,9 +322,17 @@ func (d *Drill) FinishWord(now time.Time) WordResult {
 	}
 	out.Success = out.Errors == 0 && out.Duration <= out.Threshold
 
-	d.results = append(d.results, out.Success)
-	if len(d.results) > d.Cfg.WindowSize {
-		d.results = d.results[len(d.results)-d.Cfg.WindowSize:]
+	// 反応の猶予より速く打ち終えた語で速度が発散しないよう下限を置く
+	typing := max(out.Duration-d.Cfg.ReactionBudget, 10*time.Millisecond)
+	d.records = append(d.records, WordRecord{
+		Success: out.Success,
+		Units:   len(d.word),
+		Keys:    d.wordKeys(),
+		Errors:  out.Errors,
+		Typing:  typing,
+	})
+	if len(d.records) > d.Cfg.WindowSize {
+		d.records = d.records[len(d.records)-d.Cfg.WindowSize:]
 	}
 	if slices.Contains(d.word, d.Newest()) {
 		d.newKanaWords++
@@ -308,17 +359,18 @@ func (d *Drill) FinishWord(now time.Time) WordResult {
 		}
 	}
 
-	// 窓が埋まっていて成功率が基準を上回り、新出かなを含む語も
-	// 十分に打っていたらレベルアップ
-	if successes, total := d.SuccessCount(); total >= d.Cfg.WindowSize &&
-		float64(successes)/float64(total) > d.Cfg.PromoteRate &&
+	// 窓が埋まっていて、打鍵速度とミス率の両方が基準を満たし、
+	// 新出かなを含む語も十分に打っていたらレベルアップ
+	if len(d.records) >= d.Cfg.WindowSize &&
+		d.WindowKPS() >= d.Cfg.TargetKPS &&
+		d.MissRate() <= d.Cfg.MaxMissRate &&
 		d.newKanaWords >= d.GateTarget() &&
 		d.Level < curriculum.MaxLevel() {
 		before := len(d.Allowed())
 		d.Level++
 		out.Promoted = true
 		out.KanaAdded = len(d.Allowed()) > before
-		d.results = nil
+		d.records = nil
 		d.newKanaWords = 0
 	}
 	return out
@@ -326,7 +378,7 @@ func (d *Drill) FinishWord(now time.Time) WordResult {
 
 // resetProgress は降格時に判定の記録を捨て、連鎖降格を防ぐ。
 func (d *Drill) resetProgress() {
-	d.results = nil
+	d.records = nil
 	d.newKanaWords = 0
 	for _, st := range d.Stats {
 		st.Recent = nil
