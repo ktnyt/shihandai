@@ -23,6 +23,9 @@ var (
 	styleError   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "160", Dark: "203"}).Bold(true)
 	styleNotice  = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "26", Dark: "75"}).Bold(true)
 	styleHint    = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "94", Dark: "220"})
+	// stylePending は昇格条件をまだ満たしていないゲージの塗り。
+	// 満たすと styleDone (緑) に変わる
+	stylePending = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "27", Dark: "39"})
 )
 
 // View は画面を描画する。中身を組み立てて端末の中央に置く。
@@ -219,8 +222,8 @@ func wrapKana(units []string, width int) string {
 	return joined
 }
 
-// progressBar は成功率の窓を棒で描く。緑が成功、赤が失敗、
-// 薄い部分が窓の残り（まだ打っていない分）。
+// progressBar は成功率の窓を棒で描く。赤が失敗、薄い部分が窓の残り。
+// 成功はミス率の条件を満たすまで青、満たしたら緑になる。
 func (m Model) progressBar(successes, failures int) string {
 	window := m.drill.Cfg.WindowSize
 	width := m.contentWidth() - 4
@@ -242,7 +245,11 @@ func (m Model) progressBar(successes, failures int) string {
 	}
 	rest := width - sw - fw
 
-	return styleDone.Render(strings.Repeat("█", sw)) +
+	successStyle := stylePending
+	if successes+failures >= window && m.drill.MissRate() <= m.drill.Cfg.MaxMissRate {
+		successStyle = styleDone
+	}
+	return successStyle.Render(strings.Repeat("█", sw)) +
 		styleError.Render(strings.Repeat("█", fw)) +
 		styleFaint.Render(strings.Repeat("░", rest))
 }
@@ -251,7 +258,7 @@ func (m Model) progressBar(successes, failures int) string {
 const kpmMeterMax = 180
 
 // kpmMeter は直近の窓の kpm を 0〜180 のメーターで描く。
-// 目標値の位置にマーカーを置き、達していれば緑、未達なら黄で塗る。
+// 目標値の位置にマーカーを置き、条件を満たすまで青、満たしたら緑で塗る。
 func (m Model) kpmMeter() string {
 	width := m.contentWidth() - 4
 	if width < 10 {
@@ -262,8 +269,9 @@ func (m Model) kpmMeter() string {
 	mark := int(m.drill.Cfg.TargetKPM / kpmMeterMax * float64(width))
 	mark = min(max(mark, 0), width-1)
 
-	fillStyle := styleHint
-	if kpm >= m.drill.Cfg.TargetKPM {
+	fillStyle := stylePending
+	if _, total := m.drill.SuccessCount(); total >= m.drill.Cfg.WindowSize &&
+		kpm >= m.drill.Cfg.TargetKPM {
 		fillStyle = styleDone
 	}
 	var b strings.Builder
