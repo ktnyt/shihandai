@@ -93,6 +93,10 @@ export function App() {
       if (key === undefined) return;
       e.preventDefault();
       if (e.repeat) return;
+      if (key === KeySpace && session.state === "ready") {
+        session.start();
+        return;
+      }
       if (key === KeySpace && session.state === "paused") {
         session.resume();
         return;
@@ -330,7 +334,7 @@ function WordStream({ session }: { session: Session }) {
   const drill = session.drill;
   const word = drill.currentWord();
   const pos = drill.currentPos();
-  const paused = session.state === "paused";
+  const paused = session.state === "paused" || session.state === "ready";
 
   return (
     <div class="word-stream">
@@ -362,6 +366,14 @@ function WordStream({ session }: { session: Session }) {
 }
 
 function HintLine({ session }: { session: Session }) {
+  if (session.state === "ready") {
+    return (
+      <div class="hint-line">
+        <span class="notice">Space ではじめる</span>{" "}
+        <span class="faint">(IMEはオフにしておく)</span>
+      </div>
+    );
+  }
   if (session.state === "paused") {
     return (
       <div class="hint-line">

@@ -6,7 +6,12 @@ import type { Generator } from "./lesson";
 import { recentAccuracy } from "./drill";
 import type { Key } from "./keys";
 
-export type SessionState = "typing" | "waiting" | "paused" | "leveledUp";
+export type SessionState =
+  | "ready" // 開始待ち。Space で計測が始まる
+  | "typing"
+  | "waiting"
+  | "paused"
+  | "leveledUp";
 
 // 先読みしておく単語の数。
 const QUEUE_LEN = 4;
@@ -20,7 +25,7 @@ export interface SessionOptions {
 }
 
 export class Session {
-  state: SessionState = "typing";
+  state: SessionState = "ready";
   upcoming: string[][] = [];
   kanaAdded = false; // 直近の昇格でかなが増えた
   message = "";
@@ -41,6 +46,15 @@ export class Session {
     this.newWord(opts.now());
   }
 
+  // 開始待ちから練習を始める。出題と計測はここから。
+  start(): void {
+    if (this.state !== "ready") return;
+    this.state = "typing";
+    this.engine.reset();
+    this.drill.startWord(this.drill.currentWord(), this.opts.now());
+    this.opts.onChange();
+  }
+
   keydown(key: Key): void {
     if (this.state !== "typing") return;
     this.handleEmissions(this.engine.press(key));
@@ -58,7 +72,7 @@ export class Session {
 
   // 一時停止。単語を隠して計測を止める。
   pause(): void {
-    if (this.state === "paused" || this.state === "leveledUp") return;
+    if (this.state !== "typing" && this.state !== "waiting") return;
     this.state = "paused";
     this.engine.clearHeld();
     this.flash = "";

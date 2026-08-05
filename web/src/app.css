@@ -27,6 +27,13 @@
   box-sizing: border-box;
 }
 
+/* UI は全体を rem で組んであるので、ルートのフォントサイズを
+   視口に応じて変えるだけで表示の倍率が変わる。
+   幅と高さの小さい方に合わせ、極端な拡大縮小はしない */
+html {
+  font-size: clamp(11px, min(1.4vw + 5px, 2.2vh + 5px), 26px);
+}
+
 body {
   margin: 0;
   background: var(--bg);
