@@ -1,7 +1,7 @@
 # shihandai
 
 薙刀式かな入力の段階練習ツール。
-ターミナルで動く。
+ターミナルで動く CLI 版と、ブラウザで動く Web 版がある。
 
 「ある」「ない」「する」を構成する「あいなする」の5文字から練習を始める。
 単語は monkeytype のように一列に流れてくる。いま打つ単語の右に
@@ -104,8 +104,28 @@ go run ./tools/mkdict -dict-dir <辞書のディレクトリ> -out internal/dict
 一般語の基本形だけを残し、読みをひらがなに直し、
 薙刀式で打てる語をコスト（頻度）順に並べている。
 
+## Web 版
+
+`web/` に Preact + Vite の SPA がある。ロジックは同じだが、
+ブラウザでは keyup が取れるため、同時押しの判定はタイミングウィンドウ
+ではなく QMK 本来の「リリースで確定」方式で動く。遅延がなく、
+スペースを押しっぱなしにする連続シフトもそのまま使える。
+進捗は localStorage に保存される。
+
+```sh
+cd web
+npm install
+npm run dev   # 開発サーバ
+npm test      # vitest
+```
+
+main への push で GitHub Actions が GitHub Pages にデプロイする
+(リポジトリ設定で Pages のソースを GitHub Actions にしておく)。
+`?kpm=140&missrate=0.03` のようにクエリで基準を変えられる。
+
 ## 開発
 
 ```sh
 go test -race ./...
+cd web && npm test
 ```
