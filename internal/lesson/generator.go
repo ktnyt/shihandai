@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/ktnyt/shihandai/internal/dict"
@@ -16,16 +17,21 @@ type Config struct {
 }
 
 // DefaultConfig は既定値を返す。
+// Skew 2 は「上位半分の語が約6割を占める」程度のゆるい偏りで、
+// 高頻度語を優先しつつ下位の語もそれなりに出す。
 func DefaultConfig() Config {
-	return Config{FocusRatio: 0.5, Skew: 6}
+	return Config{FocusRatio: 0.5, Skew: 2}
 }
+
+// recentMemory は連発を抑えるために覚えておく、直近に出した語の数。
+const recentMemory = 20
 
 // Generator は辞書から練習する単語を選ぶ。
 type Generator struct {
-	Cfg   Config
-	Rand  *rand.Rand
-	words []string // 頻度順
-	last  []string // 直前に出した単語。連続を避ける
+	Cfg    Config
+	Rand   *rand.Rand
+	words  []string // 頻度順
+	recent []string // 直近に出した語。しばらく出にくくする
 }
 
 // NewGenerator は埋め込み辞書を使う Generator を作る。
@@ -84,13 +90,34 @@ func (g *Generator) Word(allowed, focus []string, maxLen int) ([]string, error) 
 	if len(focused) > 0 && g.Rand.Float64() < g.Cfg.FocusRatio {
 		pool = focused
 	}
-	w := pool[g.pick(len(pool))]
-	// 同じ語が続くと練習にならないので選び直す（1回だけ）
-	if slices.Equal(w, g.last) {
+
+	// 直近に出した語は選び直す。語彙が少ないときは記憶を短くして
+	// 選べなくなるのを防ぎ、それでもだめなら重複を受け入れる
+	limit := min(recentMemory, len(pool)/2)
+	var w []string
+	for range 8 {
 		w = pool[g.pick(len(pool))]
+		if !g.recentlyShown(w, limit) {
+			break
+		}
 	}
-	g.last = w
+	g.remember(w)
 	return w, nil
+}
+
+func (g *Generator) recentlyShown(units []string, limit int) bool {
+	recent := g.recent
+	if len(recent) > limit {
+		recent = recent[len(recent)-limit:]
+	}
+	return slices.Contains(recent, strings.Join(units, ""))
+}
+
+func (g *Generator) remember(units []string) {
+	g.recent = append(g.recent, strings.Join(units, ""))
+	if len(g.recent) > recentMemory {
+		g.recent = g.recent[len(g.recent)-recentMemory:]
+	}
 }
 
 // CountWithUnit は allowed だけで打てる語のうち unit を含むものの数を返す。

@@ -135,3 +135,25 @@ func TestWordFocusFallbackBeyondMaxLen(t *testing.T) {
 		t.Fatalf("focus を含まない語が出た: %v", word)
 	}
 }
+
+func TestWordVariety(t *testing.T) {
+	// 偏りをゆるめたので、少ない語彙のレベル1でも200回で
+	// それなりの種類の語が出る
+	g := newGen(11)
+	allowed := curriculum.For(1)
+	seen := map[string]bool{}
+	for range 200 {
+		word, err := g.Word(allowed, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		key := ""
+		for _, u := range word {
+			key += u
+		}
+		seen[key] = true
+	}
+	if len(seen) < 12 {
+		t.Errorf("200回で %d 種類しか出ていない (12種類以上出るべき)", len(seen))
+	}
+}
