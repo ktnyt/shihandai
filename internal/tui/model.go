@@ -22,10 +22,13 @@ type Model struct {
 	gen    *lesson.Generator
 
 	statePath string
+	interval  time.Duration // 単語と単語の間の入力を受け付けない時間
 
 	paused    bool
 	leveledUp bool // レベルアップ画面を表示中
 	kanaAdded bool // 直近の昇格でかなが増えた（false なら長さの解放）
+	waiting   bool // 単語間のインターバル中
+	waitUntil time.Time
 	width     int
 	height    int
 	message   string
@@ -34,12 +37,15 @@ type Model struct {
 }
 
 // New は画面を作り、最初の単語を出題する。
-func New(engine *naginata.Engine, d *drill.Drill, gen *lesson.Generator, statePath string) (Model, error) {
+// interval は単語を打ち終えてから次の単語が出るまでの間で、
+// この間のキー入力は無視される（前の単語の打ち終わりの巻き込み防止）。
+func New(engine *naginata.Engine, d *drill.Drill, gen *lesson.Generator, statePath string, interval time.Duration) (Model, error) {
 	m := Model{
 		engine:    engine,
 		drill:     d,
 		gen:       gen,
 		statePath: statePath,
+		interval:  interval,
 	}
 	if err := m.newWord(time.Now()); err != nil {
 		return Model{}, err
@@ -95,9 +101,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.resume(time.Now())
 				return m, nil
 			}
+			if m.waiting {
+				return m, nil
+			}
 			return m, m.press(naginata.KeySpace, time.Now())
 		case tea.KeyRunes:
-			if m.paused || m.leveledUp {
+			if m.paused || m.leveledUp || m.waiting {
 				return m, nil
 			}
 			now := time.Now()
@@ -118,6 +127,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.paused || m.leveledUp {
 			return m, m.tick()
 		}
+		if m.waiting {
+			// インターバルが明けたら次の単語を出す
+			if !now.Before(m.waitUntil) {
+				m.waiting = false
+				if err := m.newWord(now); err != nil {
+					m.err = err
+					return m, tea.Quit
+				}
+			}
+			return m, m.tick()
+		}
 		return m, tea.Batch(m.tick(), m.handleEmissions(m.engine.Flush(now), now))
 
 	case saveErrMsg:
@@ -136,8 +156,14 @@ func (m *Model) press(key naginata.Key, now time.Time) tea.Cmd {
 func (m *Model) resume(now time.Time) {
 	m.paused = false
 	m.engine.Reset()
-	m.drill.StartWord(m.drill.Word(), now)
 	m.flash = ""
+	if m.waiting {
+		// 打ち終わり後のインターバル中だった場合は、単語を戻さず
+		// インターバルを取り直す
+		m.waitUntil = now.Add(m.interval)
+		return
+	}
+	m.drill.StartWord(m.drill.Word(), now)
 }
 
 // handleEmissions は確定したかなを判定に流す。単語が終わったら次を出題する。
@@ -156,6 +182,13 @@ func (m *Model) handleEmissions(ems []naginata.Emission, now time.Time) tea.Cmd 
 				// 次の単語は出さず、レベルアップ画面で Space を待つ
 				m.leveledUp = true
 				m.kanaAdded = out.KanaAdded
+				m.engine.Reset()
+				return saveCmd
+			}
+			if m.interval > 0 {
+				// 打ち終わりの巻き込みを防ぐため、少し置いてから次を出す
+				m.waiting = true
+				m.waitUntil = now.Add(m.interval)
 				m.engine.Reset()
 				return saveCmd
 			}

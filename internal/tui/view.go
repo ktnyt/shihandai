@@ -97,12 +97,14 @@ func (m Model) content() string {
 	}
 	b.WriteString("  " + wordView.String() + "\n\n")
 
-	// 次に打つかなの運指ヒント。一時停止中は代わりに案内を出す
+	// 次に打つかなの運指ヒント。一時停止・インターバル中は代わりに案内を出す
 	switch {
 	case m.paused:
 		fmt.Fprintf(&b, "  %s %s\n",
 			styleNotice.Render("一時停止中"),
 			styleFaint.Render("(Space で同じ単語を最初から、Esc で終了)"))
+	case m.waiting:
+		b.WriteString("  " + styleFaint.Render("つぎの単語へ…") + "\n")
 	default:
 		if expected := m.drill.Expected(); expected != "" {
 			if chord, ok := naginata.ChordFor(expected); ok {
@@ -116,7 +118,7 @@ func (m Model) content() string {
 	// 時間と成功率
 	threshold := m.drill.Threshold()
 	var timer string
-	if m.paused {
+	if m.paused || m.waiting {
 		timer = fmt.Sprintf("--.-s / %.1fs", threshold.Seconds())
 	} else {
 		elapsed := m.drill.Elapsed(time.Now())

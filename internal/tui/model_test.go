@@ -19,7 +19,8 @@ func newTestModel(t *testing.T) Model {
 	engine := naginata.NewEngine(80 * time.Millisecond)
 	d := drill.New(drill.DefaultConfig(), 1, nil)
 	gen := lesson.NewGenerator(lesson.DefaultConfig(), rand.New(rand.NewSource(1)))
-	m, err := New(engine, d, gen, "")
+	// テストではインターバルなしで即座に次の単語を出す
+	m, err := New(engine, d, gen, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +141,7 @@ func TestPromoteAfterWindowFilledWithSuccess(t *testing.T) {
 	cfg.MinNewKanaWords = 0
 	d := drill.New(cfg, 1, nil)
 	gen := lesson.NewGenerator(lesson.DefaultConfig(), rand.New(rand.NewSource(1)))
-	m, err := New(engine, d, gen, "")
+	m, err := New(engine, d, gen, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +191,7 @@ func TestEscOnLevelUpScreenQuits(t *testing.T) {
 	cfg.MinNewKanaWords = 0
 	d := drill.New(cfg, 1, nil)
 	gen := lesson.NewGenerator(lesson.DefaultConfig(), rand.New(rand.NewSource(1)))
-	m, err := New(engine, d, gen, "")
+	m, err := New(engine, d, gen, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,5 +367,54 @@ func TestProgressBarShowsWindow(t *testing.T) {
 	}
 	if !strings.Contains(view, "░") {
 		t.Errorf("窓が埋まっていないのに残り枠が消えた:\n%s", view)
+	}
+}
+
+func TestIntervalBetweenWords(t *testing.T) {
+	engine := naginata.NewEngine(80 * time.Millisecond)
+	d := drill.New(drill.DefaultConfig(), 1, nil)
+	gen := lesson.NewGenerator(lesson.DefaultConfig(), rand.New(rand.NewSource(1)))
+	m, err := New(engine, d, gen, "", 500*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first := m.drill.Word()
+	m = typeWord(t, m)
+
+	// 打ち終わってもすぐには次の単語が出ない
+	if !m.waiting {
+		t.Fatal("インターバルに入っていない")
+	}
+	if !slices.Equal(m.drill.Word(), first) {
+		t.Fatalf("インターバル中に単語が変わった: %v", m.drill.Word())
+	}
+	view := m.View()
+	if !strings.Contains(view, "つぎの単語へ") {
+		t.Errorf("インターバルの案内がない:\n%s", view)
+	}
+
+	// インターバル中のかなキーは無視され、ミスにならない
+	m = pressChord(m, naginata.Set(naginata.KeyJ))
+	if m.drill.WordErrors() != 0 {
+		t.Fatalf("インターバル中の打鍵がミス扱いされた: %d", m.drill.WordErrors())
+	}
+
+	// インターバルが明けると次の単語が出て、計測が始まる
+	next, _ := m.Update(tickMsg(time.Now().Add(time.Second)))
+	m = next.(Model)
+	if m.waiting {
+		t.Fatal("インターバルが明けない")
+	}
+	if m.drill.Pos() != 0 || len(m.drill.Word()) == 0 {
+		t.Fatalf("次の単語が始まっていない: word=%v pos=%d", m.drill.Word(), m.drill.Pos())
+	}
+	if e := m.drill.Elapsed(time.Now().Add(time.Second)); e > 2*time.Second {
+		t.Errorf("計測がインターバル明けから始まっていない: %v", e)
+	}
+	// 明けたあとは普通に打てる
+	m = typeWord(t, m)
+	if _, total := m.drill.SuccessCount(); total != 2 {
+		t.Errorf("インターバル後の単語が判定されていない")
 	}
 }
