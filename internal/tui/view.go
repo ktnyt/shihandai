@@ -245,8 +245,9 @@ func (m Model) progressBar(successes, failures int) string {
 	}
 	rest := width - sw - fw
 
+	// 現時点のミス率がしきい値内なら緑、超えていれば青で塗る
 	successStyle := stylePending
-	if successes+failures >= window && m.drill.MissRate() <= m.drill.Cfg.MaxMissRate {
+	if successes+failures > 0 && m.drill.MissRate() <= m.drill.Cfg.MaxMissRate {
 		successStyle = styleDone
 	}
 	return successStyle.Render(strings.Repeat("█", sw)) +
@@ -269,9 +270,9 @@ func (m Model) kpmMeter() string {
 	mark := int(m.drill.Cfg.TargetKPM / kpmMeterMax * float64(width))
 	mark = min(max(mark, 0), width-1)
 
+	// 現時点の kpm が目標に達していれば緑、未達なら青で塗る
 	fillStyle := stylePending
-	if _, total := m.drill.SuccessCount(); total >= m.drill.Cfg.WindowSize &&
-		kpm >= m.drill.Cfg.TargetKPM {
+	if kpm >= m.drill.Cfg.TargetKPM {
 		fillStyle = styleDone
 	}
 	var b strings.Builder
