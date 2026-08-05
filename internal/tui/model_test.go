@@ -96,19 +96,37 @@ func TestTypingWordRecordsSuccessAndStartsNext(t *testing.T) {
 	_ = first
 }
 
-func TestSlowWordRecordsFailure(t *testing.T) {
+func TestSlowWordStillSucceedsWithoutMiss(t *testing.T) {
 	m := newTestModel(t)
 
-	// しきい値を必ず超えるよう、経過時間を進めてから打ち切る
+	// どれだけ時間がかかってもノーミスなら成功と数える
 	m.drill.StartWord(m.drill.Word(), time.Now().Add(-time.Minute))
+	m = typeWord(t, m)
+
+	successes, total := m.drill.SuccessCount()
+	if successes != 1 || total != 1 {
+		t.Fatalf("SuccessCount = %d/%d, want 1/1", successes, total)
+	}
+}
+
+func TestMissedWordRecordsFailure(t *testing.T) {
+	m := newTestModel(t)
+
+	// 1回ミスしてから打ち切ると失敗として記録される
+	expected := m.drill.Expected()
+	wrongKey := naginata.KeyJ
+	if expected == "あ" {
+		wrongKey = naginata.KeyK
+	}
+	m = pressChord(m, naginata.Set(wrongKey))
 	m = typeWord(t, m)
 
 	successes, total := m.drill.SuccessCount()
 	if successes != 0 || total != 1 {
 		t.Fatalf("SuccessCount = %d/%d, want 0/1", successes, total)
 	}
-	if !strings.Contains(m.View(), "時間超過") {
-		t.Errorf("時間超過メッセージが出ていない:\n%s", m.View())
+	if !strings.Contains(m.View(), "失敗") {
+		t.Errorf("失敗メッセージが出ていない:\n%s", m.View())
 	}
 }
 

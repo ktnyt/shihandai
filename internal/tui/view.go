@@ -115,17 +115,12 @@ func (m Model) content() string {
 		}
 	}
 
-	// 時間と成功率
-	threshold := m.drill.Threshold()
+	// 経過時間とミス
 	var timer string
 	if m.paused || m.waiting {
-		timer = fmt.Sprintf("--.-s / %.1fs", threshold.Seconds())
+		timer = "--.-s"
 	} else {
-		elapsed := m.drill.Elapsed(time.Now())
-		timer = fmt.Sprintf("%5.1fs / %.1fs", elapsed.Seconds(), threshold.Seconds())
-		if elapsed > threshold {
-			timer = styleError.Render(timer)
-		}
+		timer = fmt.Sprintf("%5.1fs", m.drill.Elapsed(time.Now()).Seconds())
 	}
 	fmt.Fprintf(&b, "\n  %s   ミス %d\n", timer, m.drill.WordErrors())
 

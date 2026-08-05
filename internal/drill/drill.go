@@ -190,12 +190,6 @@ func (d *Drill) Elapsed(now time.Time) time.Duration {
 	return now.Sub(d.shownAt)
 }
 
-// Threshold は現在の単語を成功とみなす制限時間を返す。
-// 打鍵数ぶんの時間を目標打鍵速度で換算する。
-func (d *Drill) Threshold() time.Duration {
-	return time.Duration(float64(d.wordKeys()) / d.Cfg.TargetKPM * float64(time.Minute))
-}
-
 // wordKeys は現在の単語の打鍵数を返す。
 func (d *Drill) wordKeys() int {
 	keys := 0
@@ -298,11 +292,10 @@ func (d *Drill) MissRate() float64 {
 
 // WordResult は単語を打ち終えたときの判定。
 type WordResult struct {
-	Success   bool
-	Duration  time.Duration
-	Threshold time.Duration
-	Errors    int
-	Promoted  bool
+	Success  bool
+	Duration time.Duration
+	Errors   int
+	Promoted bool
 	// KanaAdded は昇格でかなが増えたことを示す。false の昇格は長さの解放。
 	KanaAdded bool
 	Demoted   bool
@@ -313,11 +306,11 @@ type WordResult struct {
 // FinishWord は単語の結果を集計し、昇格・降格を反映する。
 func (d *Drill) FinishWord(now time.Time) WordResult {
 	out := WordResult{
-		Duration:  d.Elapsed(now),
-		Threshold: d.Threshold(),
-		Errors:    d.wordErrors,
+		Duration: d.Elapsed(now),
+		Errors:   d.wordErrors,
 	}
-	out.Success = out.Errors == 0 && out.Duration <= out.Threshold
+	// 成功はミスの有無だけで決める。速さは窓の kpm で別に判定する
+	out.Success = out.Errors == 0
 
 	// 一瞬で打ち終えた語で速度が発散しないよう下限を置く
 	typing := max(out.Duration, 10*time.Millisecond)

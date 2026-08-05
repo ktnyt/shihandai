@@ -59,22 +59,6 @@ func TestInputIgnoresControlText(t *testing.T) {
 	}
 }
 
-func TestThresholdScalesWithKeys(t *testing.T) {
-	d := New(DefaultConfig(), 1, nil)
-
-	// あ(J)+る(I) = 2打鍵。120kpm なら1秒
-	d.StartWord([]string{"あ", "る"}, time.Unix(0, 0))
-	if got := d.Threshold(); got != time.Second {
-		t.Errorf("Threshold(ある) = %v, want 1s", got)
-	}
-
-	// が(F+J) は2打鍵で1文字
-	d.StartWord([]string{"が"}, time.Unix(0, 0))
-	if got := d.Threshold(); got != time.Second {
-		t.Errorf("Threshold(が) = %v, want 1s", got)
-	}
-}
-
 func TestFinishWordSuccessAndFailure(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -82,8 +66,8 @@ func TestFinishWordSuccessAndFailure(t *testing.T) {
 		miss    bool
 		want    bool
 	}{
-		{"時間内ノーミスは成功", time.Second, false, true},
-		{"時間超過は失敗", 10 * time.Second, false, false},
+		{"ノーミスは成功", time.Second, false, true},
+		{"遅くてもノーミスなら成功", 10 * time.Second, false, true},
 		{"ミスがあると失敗", time.Second, true, false},
 	}
 	for _, tt := range tests {
@@ -309,18 +293,18 @@ func TestNoDemoteOnNewestKana(t *testing.T) {
 	}
 }
 
-func TestTimeoutFailureDoesNotDemote(t *testing.T) {
+func TestSlowWordsDoNotDemote(t *testing.T) {
 	cfg := DefaultConfig()
 	d := New(cfg, 5, nil)
 
-	// 時間超過の失敗をいくら重ねても、打ち間違いがなければ降格しない
+	// どれだけ遅くても、打ち間違いがなければ成功のままで降格もしない
 	for range cfg.MinAttempts * 3 {
 		out := typeWord(d, []string{"あ", "い"}, 10*time.Second)
-		if out.Success {
-			t.Fatal("前提が崩れた: 時間超過なのに成功になった")
+		if !out.Success {
+			t.Fatal("ノーミスなのに失敗になった")
 		}
 		if out.Demoted {
-			t.Fatal("時間超過で降格した")
+			t.Fatal("遅いだけで降格した")
 		}
 	}
 	if d.Level != 5 {
