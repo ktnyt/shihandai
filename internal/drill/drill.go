@@ -50,13 +50,12 @@ func (s *UnitStat) RecentAccuracy() float64 {
 
 // Config は判定の調整項目。
 type Config struct {
-	TargetKPM       float64       // 昇格に必要な打鍵速度 (keys per minute)
-	MaxMissRate     float64       // 昇格できるミス率の上限
-	ReactionBudget  time.Duration // 表示から打ち始めるまでの猶予
-	WindowSize      int           // 判定に使う直近の単語数
-	MinNewKanaWords int           // 昇格までに打つ、新出かなを含む語の最低数
-	DemoteAccuracy  float64       // これを下回ると降格するかなの直近正答率
-	MinAttempts     int           // 降格判定に必要な直近試行数
+	TargetKPM       float64 // 昇格に必要な打鍵速度 (keys per minute)
+	MaxMissRate     float64 // 昇格できるミス率の上限
+	WindowSize      int     // 判定に使う直近の単語数
+	MinNewKanaWords int     // 昇格までに打つ、新出かなを含む語の最低数
+	DemoteAccuracy  float64 // これを下回ると降格するかなの直近正答率
+	MinAttempts     int     // 降格判定に必要な直近試行数
 }
 
 // DefaultConfig は既定値を返す。
@@ -67,7 +66,6 @@ func DefaultConfig() Config {
 	return Config{
 		TargetKPM:       120,
 		MaxMissRate:     0.05,
-		ReactionBudget:  time.Second,
 		WindowSize:      100,
 		MinNewKanaWords: 50,
 		DemoteAccuracy:  0.70,
@@ -81,7 +79,7 @@ type WordRecord struct {
 	Units   int           `json:"units"`  // 正しく打ったかなの数
 	Keys    int           `json:"keys"`   // 打鍵数 (同時押しは複数と数える)
 	Errors  int           `json:"errors"` // ミス入力の数
-	Typing  time.Duration `json:"typing"` // 反応の猶予を引いた打鍵時間
+	Typing  time.Duration `json:"typing"` // 表示から打ち終わるまでの時間
 }
 
 // Drill は練習全体の状態。
@@ -193,10 +191,9 @@ func (d *Drill) Elapsed(now time.Time) time.Duration {
 }
 
 // Threshold は現在の単語を成功とみなす制限時間を返す。
-// 反応の猶予に、打鍵数ぶんの時間を目標打鍵速度で換算して足す。
+// 打鍵数ぶんの時間を目標打鍵速度で換算する。
 func (d *Drill) Threshold() time.Duration {
-	typing := time.Duration(float64(d.wordKeys()) / d.Cfg.TargetKPM * float64(time.Minute))
-	return d.Cfg.ReactionBudget + typing
+	return time.Duration(float64(d.wordKeys()) / d.Cfg.TargetKPM * float64(time.Minute))
 }
 
 // wordKeys は現在の単語の打鍵数を返す。
@@ -271,7 +268,7 @@ func (d *Drill) SuccessCount() (successes, total int) {
 }
 
 // WindowKPM は直近の窓の打鍵速度 (keys per minute) を返す。
-// 各単語の経過時間から反応の猶予を引いた分を打鍵時間とみなす。
+// 表示から打ち終わるまでの時間で計算する。
 func (d *Drill) WindowKPM() float64 {
 	keys := 0
 	var typing time.Duration
@@ -322,8 +319,8 @@ func (d *Drill) FinishWord(now time.Time) WordResult {
 	}
 	out.Success = out.Errors == 0 && out.Duration <= out.Threshold
 
-	// 反応の猶予より速く打ち終えた語で速度が発散しないよう下限を置く
-	typing := max(out.Duration-d.Cfg.ReactionBudget, 10*time.Millisecond)
+	// 一瞬で打ち終えた語で速度が発散しないよう下限を置く
+	typing := max(out.Duration, 10*time.Millisecond)
 	d.records = append(d.records, WordRecord{
 		Success: out.Success,
 		Units:   len(d.word),

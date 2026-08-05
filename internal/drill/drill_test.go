@@ -62,16 +62,16 @@ func TestInputIgnoresControlText(t *testing.T) {
 func TestThresholdScalesWithKeys(t *testing.T) {
 	d := New(DefaultConfig(), 1, nil)
 
-	// あ(J)+る(I) = 2打鍵。120kpm なら打鍵に1秒、猶予1秒で計2秒
+	// あ(J)+る(I) = 2打鍵。120kpm なら1秒
 	d.StartWord([]string{"あ", "る"}, time.Unix(0, 0))
-	if got := d.Threshold(); got != 2*time.Second {
-		t.Errorf("Threshold(ある) = %v, want 2s", got)
+	if got := d.Threshold(); got != time.Second {
+		t.Errorf("Threshold(ある) = %v, want 1s", got)
 	}
 
 	// が(F+J) は2打鍵で1文字
 	d.StartWord([]string{"が"}, time.Unix(0, 0))
-	if got := d.Threshold(); got != 2*time.Second {
-		t.Errorf("Threshold(が) = %v, want 2s", got)
+	if got := d.Threshold(); got != time.Second {
+		t.Errorf("Threshold(が) = %v, want 1s", got)
 	}
 }
 
@@ -109,11 +109,11 @@ func TestPromoteWhenBothThresholdsMet(t *testing.T) {
 	cfg.MinNewKanaWords = 10
 	d := New(cfg, 1, nil)
 
-	// 「ある」は2打鍵。1.5秒 (打鍵時間0.5秒 → 240kpm) でノーミスなら
+	// 「ある」は2打鍵。0.9秒 (133kpm) でノーミスなら
 	// kpm もミス率も基準を満たす
 	var out WordResult
 	for range cfg.WindowSize {
-		out = typeWord(d, []string{"あ", "る"}, 1500*time.Millisecond)
+		out = typeWord(d, []string{"あ", "る"}, 900*time.Millisecond)
 	}
 	if !out.Promoted {
 		t.Fatalf("昇格しなかった: %+v (kpm=%.0f miss=%.2f)", out, d.WindowKPM(), d.MissRate())
@@ -138,7 +138,7 @@ func TestNoPromoteWhenKPSTooLow(t *testing.T) {
 	cfg.MinNewKanaWords = 0
 	d := New(cfg, 1, nil)
 
-	// 3秒 (打鍵時間2秒 → 2打鍵で 60kpm) はノーミスでも遅すぎる
+	// 3秒 (2打鍵で 40kpm) はノーミスでも遅すぎる
 	for range cfg.WindowSize * 2 {
 		if out := typeWord(d, []string{"あ", "る"}, 3*time.Second); out.Promoted {
 			t.Fatal("kpm 不足なのに昇格した")
@@ -151,7 +151,7 @@ func TestNoPromoteWhenKPSTooLow(t *testing.T) {
 	// 速い語で窓が入れ替われば昇格する
 	promoted := false
 	for range cfg.WindowSize {
-		if out := typeWord(d, []string{"あ", "る"}, 1200*time.Millisecond); out.Promoted {
+		if out := typeWord(d, []string{"あ", "る"}, 800*time.Millisecond); out.Promoted {
 			promoted = true
 			break
 		}
@@ -174,7 +174,7 @@ func TestNoPromoteWhenMissRateTooHigh(t *testing.T) {
 		d.Input("い") // ミス
 		d.Input("あ")
 		d.Input("る")
-		if out := d.FinishWord(start.Add(1200 * time.Millisecond)); out.Promoted {
+		if out := d.FinishWord(start.Add(900 * time.Millisecond)); out.Promoted {
 			t.Fatal("ミス率が高いのに昇格した")
 		}
 	}
@@ -185,7 +185,7 @@ func TestNoPromoteWhenMissRateTooHigh(t *testing.T) {
 	// ノーミスの語で窓が入れ替われば昇格する
 	promoted := false
 	for range cfg.WindowSize {
-		if out := typeWord(d, []string{"あ", "る"}, 1200*time.Millisecond); out.Promoted {
+		if out := typeWord(d, []string{"あ", "る"}, 900*time.Millisecond); out.Promoted {
 			promoted = true
 			break
 		}
@@ -214,7 +214,7 @@ func TestNoPromoteWithoutEnoughNewKanaWords(t *testing.T) {
 	// 「る」を含む語を10語打てば昇格できる
 	var out WordResult
 	for range cfg.MinNewKanaWords {
-		out = typeWord(d, []string{"あ", "る"}, 1200*time.Millisecond)
+		out = typeWord(d, []string{"あ", "る"}, 900*time.Millisecond)
 	}
 	if !out.Promoted {
 		t.Fatalf("ゲートを満たしたのに昇格しない: %+v (gate=%d)", out, d.NewKanaWords())
@@ -229,7 +229,7 @@ func TestPromoteKanaAddedEveryFourLevels(t *testing.T) {
 
 	var out WordResult
 	for range cfg.WindowSize {
-		out = typeWord(d, []string{"あ", "る"}, time.Second)
+		out = typeWord(d, []string{"あ", "る"}, 900*time.Millisecond)
 	}
 	if !out.Promoted || !out.KanaAdded {
 		t.Fatalf("レベル4→5でかな追加になっていない: %+v", out)
@@ -408,13 +408,13 @@ func TestProgressRoundtrip(t *testing.T) {
 	}
 }
 
-func TestWindowKPMSubtractsReaction(t *testing.T) {
+func TestWindowKPMUsesElapsedTime(t *testing.T) {
 	cfg := DefaultConfig()
 	d := New(cfg, 1, nil)
 
-	// 経過2秒のうち反応の猶予1秒を引いた1秒が打鍵時間になる
-	typeWord(d, []string{"あ", "る"}, 2*time.Second)
+	// 表示から打ち終わりまでの素の時間で計算する
+	typeWord(d, []string{"あ", "る"}, time.Second)
 	if got := d.WindowKPM(); got != 120 {
-		t.Errorf("WindowKPM = %.0f, want 120 (2打鍵/(2s-1s))", got)
+		t.Errorf("WindowKPM = %.0f, want 120 (2打鍵/1秒)", got)
 	}
 }

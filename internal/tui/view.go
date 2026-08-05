@@ -131,6 +131,7 @@ func (m Model) content() string {
 
 	successes, total := m.drill.SuccessCount()
 	b.WriteString("  " + m.progressBar(successes, total-successes) + "\n")
+	b.WriteString("  " + m.kpmMeter() + "\n")
 	kpm := m.drill.WindowKPM()
 	missRate := m.drill.MissRate()
 	fmt.Fprintf(&b, "  kpm %.0f/%.0f  ミス率 %.1f%%/%.1f%%  直近 %d/%d 語 (両方みたすとレベルアップ)\n",
@@ -240,6 +241,39 @@ func (m Model) progressBar(successes, failures int) string {
 	return styleDone.Render(strings.Repeat("█", sw)) +
 		styleError.Render(strings.Repeat("█", fw)) +
 		styleFaint.Render(strings.Repeat("░", rest))
+}
+
+// kpmMeterMax はメーターの右端の値。
+const kpmMeterMax = 180
+
+// kpmMeter は直近の窓の kpm を 0〜180 のメーターで描く。
+// 目標値の位置にマーカーを置き、達していれば緑、未達なら黄で塗る。
+func (m Model) kpmMeter() string {
+	width := m.contentWidth() - 4
+	if width < 10 {
+		return ""
+	}
+	kpm := m.drill.WindowKPM()
+	fill := int(min(kpm, kpmMeterMax) / kpmMeterMax * float64(width))
+	mark := int(m.drill.Cfg.TargetKPM / kpmMeterMax * float64(width))
+	mark = min(max(mark, 0), width-1)
+
+	fillStyle := styleHint
+	if kpm >= m.drill.Cfg.TargetKPM {
+		fillStyle = styleDone
+	}
+	var b strings.Builder
+	for i := range width {
+		switch {
+		case i == mark:
+			b.WriteString(styleNotice.Render("┃"))
+		case i < fill:
+			b.WriteString(fillStyle.Render("█"))
+		default:
+			b.WriteString(styleFaint.Render("░"))
+		}
+	}
+	return b.String()
 }
 
 // maxLenLabel は長さ制限の表示名を返す。

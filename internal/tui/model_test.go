@@ -347,6 +347,13 @@ func TestViewCentersInTerminal(t *testing.T) {
 	}
 }
 
+func TestKPMMeterShown(t *testing.T) {
+	m := newTestModel(t)
+	if !strings.Contains(m.View(), "┃") {
+		t.Errorf("kpmメーターの目標マーカーがない:\n%s", m.View())
+	}
+}
+
 func TestProgressBarShowsWindow(t *testing.T) {
 	m := newTestModel(t)
 
