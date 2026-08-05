@@ -106,22 +106,27 @@ func TestFinishWordSuccessAndFailure(t *testing.T) {
 func TestPromoteWhenWindowRateExceeded(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.WindowSize = 20
+	cfg.MinNewKanaWords = 10
 	d := New(cfg, 1, nil)
 
 	// 19/20 = 95% は「95%を上回る」を満たさない
+	// (「ある」は新出かな「る」を含むのでゲートは十分たまる)
 	var out WordResult
-	out = typeWord(d, []string{"あ", "い"}, 10*time.Second) // 失敗1
+	out = typeWord(d, []string{"あ", "る"}, 10*time.Second) // 失敗1
 	for range cfg.WindowSize - 1 {
-		out = typeWord(d, []string{"あ", "い"}, time.Second)
+		out = typeWord(d, []string{"あ", "る"}, time.Second)
 	}
 	if out.Promoted || d.Level != 1 {
 		t.Fatalf("95%%ちょうどで昇格した: Level = %d", d.Level)
 	}
 
 	// 窓が成功で埋まれば昇格し、カウンターが空になる
-	out = typeWord(d, []string{"あ", "い"}, time.Second)
+	out = typeWord(d, []string{"あ", "る"}, time.Second)
 	if !out.Promoted {
 		t.Fatalf("昇格しなかった: %+v", out)
+	}
+	if out.KanaAdded {
+		t.Errorf("レベル1→2はかな追加ではなく長さの解放のはず: %+v", out)
 	}
 	if d.Level != 2 {
 		t.Errorf("Level = %d, want 2", d.Level)
@@ -129,14 +134,65 @@ func TestPromoteWhenWindowRateExceeded(t *testing.T) {
 	if _, total := d.SuccessCount(); total != 0 {
 		t.Errorf("昇格後にカウンターが残っている: %d", total)
 	}
+	if d.NewKanaWords() != 0 {
+		t.Errorf("昇格後にゲートのカウンターが残っている: %d", d.NewKanaWords())
+	}
+}
+
+func TestNoPromoteWithoutEnoughNewKanaWords(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.WindowSize = 5
+	cfg.MinNewKanaWords = 10
+	d := New(cfg, 1, nil)
+
+	// 「あい」は新出かな「る」を含まないので、いくら成功しても昇格しない
+	for range 30 {
+		if out := typeWord(d, []string{"あ", "い"}, time.Second); out.Promoted {
+			t.Fatal("新出かなの語が足りないのに昇格した")
+		}
+	}
+	if d.Level != 1 {
+		t.Fatalf("Level = %d, want 1", d.Level)
+	}
+
+	// 「る」を含む語を10語打てば昇格できる
+	var out WordResult
+	for range cfg.MinNewKanaWords {
+		out = typeWord(d, []string{"あ", "る"}, time.Second)
+	}
+	if !out.Promoted {
+		t.Fatalf("ゲートを満たしたのに昇格しない: %+v (gate=%d)", out, d.NewKanaWords())
+	}
+}
+
+func TestPromoteKanaAddedEveryFourLevels(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.WindowSize = 2
+	cfg.MinNewKanaWords = 0
+	d := New(cfg, 4, nil) // 次の昇格でかなが増える
+
+	var out WordResult
+	for range cfg.WindowSize {
+		out = typeWord(d, []string{"あ", "る"}, time.Second)
+	}
+	if !out.Promoted || !out.KanaAdded {
+		t.Fatalf("レベル4→5でかな追加になっていない: %+v", out)
+	}
+	if got := len(d.Allowed()); got != 6 {
+		t.Errorf("かな %d文字, want 6", got)
+	}
+	if st := d.Stage(); st.MaxLen != 2 {
+		t.Errorf("かな追加後は2文字語に戻るべき: MaxLen = %d", st.MaxLen)
+	}
 }
 
 func TestNoPromoteBeforeWindowFilled(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.WindowSize = 20
+	cfg.MinNewKanaWords = 0
 	d := New(cfg, 1, nil)
 	for range cfg.WindowSize - 1 {
-		if out := typeWord(d, []string{"あ", "い"}, time.Second); out.Promoted {
+		if out := typeWord(d, []string{"あ", "る"}, time.Second); out.Promoted {
 			t.Fatal("窓が埋まる前に昇格した")
 		}
 	}
@@ -235,6 +291,7 @@ func TestNoDemoteBelowLevel1(t *testing.T) {
 func TestNoPromoteAboveMaxLevel(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.WindowSize = 2
+	cfg.MinNewKanaWords = 0
 	d := New(cfg, curriculum.MaxLevel(), nil)
 	for range cfg.WindowSize + 1 {
 		typeWord(d, []string{"あ", "い"}, time.Second)
@@ -266,5 +323,23 @@ func TestRecentAccuracyWindow(t *testing.T) {
 	}
 	if s.Attempts != recentWindow*2 {
 		t.Errorf("Attempts = %d, want %d", s.Attempts, recentWindow*2)
+	}
+}
+
+func TestProgressRoundtrip(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.WindowSize = 5
+	d := New(cfg, 1, nil)
+	d.SetProgress([]bool{true, true, false, true, true, true, true}, 30)
+
+	results, newKana := d.Progress()
+	if len(results) != cfg.WindowSize {
+		t.Errorf("窓の大きさに切り詰められていない: %d", len(results))
+	}
+	if newKana != 30 {
+		t.Errorf("NewKanaWords = %d, want 30", newKana)
+	}
+	if successes, total := d.SuccessCount(); total != 5 || successes != 4 {
+		t.Errorf("SuccessCount = %d/%d, want 4/5", successes, total)
 	}
 }

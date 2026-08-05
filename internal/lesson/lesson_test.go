@@ -44,7 +44,7 @@ func TestWordAtEveryLevel(t *testing.T) {
 	g := newGen(1)
 	for level := 1; level <= curriculum.MaxLevel(); level++ {
 		allowed := curriculum.For(level)
-		word, err := g.Word(allowed, allowed[len(allowed)-1:])
+		word, err := g.Word(allowed, allowed[len(allowed)-1:], 0)
 		if err != nil {
 			t.Fatalf("レベル %d で単語が選べない: %v", level, err)
 		}
@@ -66,7 +66,7 @@ func TestWordFocusBias(t *testing.T) {
 
 	focus := []string{"る"}
 	for range 20 {
-		word, err := g.Word(curriculum.For(1), focus)
+		word, err := g.Word(curriculum.For(1), focus, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -78,7 +78,7 @@ func TestWordFocusBias(t *testing.T) {
 
 func TestWordErrorWhenNoWords(t *testing.T) {
 	g := newGen(1)
-	if _, err := g.Word([]string{"っ"}, nil); err == nil {
+	if _, err := g.Word([]string{"っ"}, nil, 0); err == nil {
 		t.Fatal("打てる語がないのにエラーにならない")
 	}
 }
@@ -91,7 +91,7 @@ func TestWordAvoidsImmediateRepeat(t *testing.T) {
 	repeats := 0
 	var last []string
 	for range 100 {
-		word, err := g.Word(allowed, nil)
+		word, err := g.Word(allowed, nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -102,5 +102,36 @@ func TestWordAvoidsImmediateRepeat(t *testing.T) {
 	}
 	if repeats > 5 {
 		t.Errorf("同じ語の連続が %d/100 回もある", repeats)
+	}
+}
+
+func TestWordRespectsMaxLen(t *testing.T) {
+	g := newGen(3)
+	allowed := curriculum.For(30)
+	for range 50 {
+		word, err := g.Word(allowed, nil, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(word) > 2 {
+			t.Fatalf("最大2文字のはずが %v が出た", word)
+		}
+	}
+}
+
+func TestWordFocusFallbackBeyondMaxLen(t *testing.T) {
+	// 「ぴゃ」を含む2文字語は辞書にないので、focus を優先するときは
+	// 長さ制限を超えてでも出す
+	cfg := DefaultConfig()
+	cfg.FocusRatio = 1
+	g := NewGenerator(cfg, rand.New(rand.NewSource(1)))
+	allowed := curriculum.For(curriculum.MaxLevel())
+
+	word, err := g.Word(allowed, []string{"ぴゃ"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsAny(word, []string{"ぴゃ"}) {
+		t.Fatalf("focus を含まない語が出た: %v", word)
 	}
 }

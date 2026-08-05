@@ -19,13 +19,50 @@ func TestForStartsWithAinasuru(t *testing.T) {
 	}
 }
 
-func TestForGrowsByOne(t *testing.T) {
-	for level := 1; level < MaxLevel(); level++ {
-		a, b := For(level), For(level+1)
-		if len(b) != len(a)+1 {
-			t.Fatalf("レベル %d→%d でかなが %d→%d に増えた (1ずつ増えるべき)",
-				level, level+1, len(a), len(b))
+func TestStageLengthProgression(t *testing.T) {
+	// かな1文字ごとに 2→3→4→5 文字の4段階を踏む
+	tests := []struct {
+		level    int
+		kana     int
+		maxLen   int
+	}{
+		{1, 5, 2},
+		{2, 5, 3},
+		{3, 5, 4},
+		{4, 5, 5},
+		{5, 6, 2}, // 新しいかなが入って2文字に戻る
+		{6, 6, 3},
+		{9, 7, 2},
+	}
+	for _, tt := range tests {
+		st := StageFor(tt.level)
+		if len(st.Units) != tt.kana || st.MaxLen != tt.maxLen {
+			t.Errorf("StageFor(%d) = %d文字/最大%d, want %d文字/最大%d",
+				tt.level, len(st.Units), st.MaxLen, tt.kana, tt.maxLen)
 		}
+	}
+}
+
+func TestStageKanaGrowsEveryFourLevels(t *testing.T) {
+	for level := 1; level < MaxLevel(); level++ {
+		a, b := len(For(level)), len(For(level+1))
+		wantGrow := level%4 == 0
+		if wantGrow && b != a+1 {
+			t.Fatalf("レベル %d→%d でかなが %d→%d (1増えるべき)", level, level+1, a, b)
+		}
+		if !wantGrow && b != a {
+			t.Fatalf("レベル %d→%d でかなが %d→%d (変わらないべき)", level, level+1, a, b)
+		}
+	}
+}
+
+func TestFinalStageUnlocksAllLengths(t *testing.T) {
+	st := StageFor(MaxLevel())
+	if st.MaxLen != 0 {
+		t.Errorf("最終レベルの MaxLen = %d, want 0 (全開放)", st.MaxLen)
+	}
+	if len(st.Units) != len(For(MaxLevel())) {
+		t.Errorf("最終レベルで全かなが解放されていない")
 	}
 }
 

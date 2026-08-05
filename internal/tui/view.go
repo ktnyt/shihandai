@@ -37,8 +37,9 @@ func (m Model) View() string {
 	fmt.Fprintf(&b, "%s  %s\n",
 		styleTitle.Render("shihandai — 薙刀式タイピング練習"),
 		styleFaint.Render("(Esc で一時停止)"))
-	fmt.Fprintf(&b, "レベル %d/%d  かな %d文字  いまの段階: %s\n\n",
-		m.drill.Level, curriculum.MaxLevel(), len(allowed), curriculum.GroupOf(newest))
+	fmt.Fprintf(&b, "レベル %d/%d  かな %d文字  ながさ %s  いまの段階: %s\n\n",
+		m.drill.Level, curriculum.MaxLevel(), len(allowed),
+		maxLenLabel(m.drill.Stage().MaxLen), curriculum.GroupOf(newest))
 
 	fmt.Fprintf(&b, "%s %s\n\n",
 		styleFaint.Render("使えるかな:"),
@@ -46,10 +47,15 @@ func (m Model) View() string {
 
 	if m.leveledUp {
 		fmt.Fprintf(&b, "  %s\n\n", styleNotice.Render(fmt.Sprintf("レベルアップ! レベル %d", m.drill.Level)))
-		if chord, ok := naginata.ChordFor(newest); ok {
-			fmt.Fprintf(&b, "  あたらしいかな: %s %s\n\n",
-				styleCurrent.Render(newest),
-				styleHint.Render("["+chord.Label()+"]"))
+		if m.kanaAdded {
+			if chord, ok := naginata.ChordFor(newest); ok {
+				fmt.Fprintf(&b, "  あたらしいかな: %s %s\n\n",
+					styleCurrent.Render(newest),
+					styleHint.Render("["+chord.Label()+"]"))
+			}
+		} else {
+			fmt.Fprintf(&b, "  ながさ %s の語がでるようになった\n\n",
+				maxLenLabel(m.drill.Stage().MaxLen))
 		}
 		b.WriteString("  " + styleFaint.Render("Space ではじめる、Esc で終了") + "\n")
 		return b.String()
@@ -113,6 +119,9 @@ func (m Model) View() string {
 	fmt.Fprintf(&b, "  直近 %d/%d 語 成功率 %s  (%d 語で %.0f%% を超えたらレベルアップ)\n",
 		successes, total, rate,
 		m.drill.Cfg.WindowSize, m.drill.Cfg.PromoteRate*100)
+	fmt.Fprintf(&b, "  %s\n",
+		styleFaint.Render(fmt.Sprintf("「%s」を含む語 %d/%d",
+			newest, m.drill.NewKanaWords(), m.drill.GateTarget())))
 
 	if m.flash != "" {
 		b.WriteString("  " + styleError.Render(m.flash) + "\n")
@@ -178,6 +187,14 @@ func wrapKana(units []string, width int) string {
 		}
 	}
 	return joined
+}
+
+// maxLenLabel は長さ制限の表示名を返す。
+func maxLenLabel(maxLen int) string {
+	if maxLen <= 0 {
+		return "せいげんなし"
+	}
+	return fmt.Sprintf("%d文字まで", maxLen)
 }
 
 // mask はかなを同じ表示幅の伏せ字にする。

@@ -85,21 +85,44 @@ var flattened = func() []string {
 // initialCount は最初のレベルで解放されているかなの数。
 const initialCount = 5
 
-// MaxLevel は最大レベルを返す。レベル1で5文字、以後1レベルごとに1文字増える。
-func MaxLevel() int { return len(flattened) - initialCount + 1 }
+// lengthSteps はかな1文字ごとに踏む単語の長さの段階。
+// 新しいかなが入るたびに2文字の語から習い直す。
+var lengthSteps = []int{2, 3, 4, 5}
 
-// For はレベルに対応する解放済みかなの一覧を返す。
-func For(level int) []string {
+// Stage はレベルに対応する出題条件。
+type Stage struct {
+	Units  []string // 使えるかな
+	MaxLen int      // 出題する単語の最大文字数。0 なら無制限
+}
+
+// MaxLevel は最大レベルを返す。
+// かなの段階 × 長さの段階で、最終レベルでは長さの制限がなくなる。
+func MaxLevel() int {
+	return (len(flattened) - initialCount + 1) * len(lengthSteps)
+}
+
+// StageFor はレベルに対応する出題条件を返す。
+func StageFor(level int) Stage {
 	if level < 1 {
 		level = 1
 	}
 	if level > MaxLevel() {
 		level = MaxLevel()
 	}
+	kanaIdx := (level - 1) / len(lengthSteps)
+	step := (level - 1) % len(lengthSteps)
+
 	// 呼び出し側の append がパッケージ変数を壊さないよう容量も切り詰める
-	n := initialCount + level - 1
-	return flattened[:n:n]
+	n := initialCount + kanaIdx
+	st := Stage{Units: flattened[:n:n], MaxLen: lengthSteps[step]}
+	if level == MaxLevel() {
+		st.MaxLen = 0 // 最後まで来たら長さは全開放
+	}
+	return st
 }
+
+// For はレベルに対応する解放済みかなの一覧を返す。
+func For(level int) []string { return StageFor(level).Units }
 
 // GroupOf はかなが属するグループ名を返す。
 func GroupOf(unit string) string {

@@ -6,6 +6,7 @@
 package drill
 
 import (
+	"slices"
 	"time"
 
 	"github.com/ktnyt/shihandai/internal/curriculum"
@@ -49,12 +50,13 @@ func (s *UnitStat) RecentAccuracy() float64 {
 
 // Config は判定の調整項目。
 type Config struct {
-	TargetKPM      float64       // 目標打鍵速度。しきい値時間の計算に使う
-	ReactionBudget time.Duration // 表示から打ち始めるまでの猶予
-	WindowSize     int           // 成功率を測る直近の単語数
-	PromoteRate    float64       // これを上回ったらレベルアップする成功率
-	DemoteAccuracy float64       // これを下回ると降格するかなの直近正答率
-	MinAttempts    int           // 降格判定に必要な直近試行数
+	TargetKPM       float64       // 目標打鍵速度。しきい値時間の計算に使う
+	ReactionBudget  time.Duration // 表示から打ち始めるまでの猶予
+	WindowSize      int           // 成功率を測る直近の単語数
+	PromoteRate     float64       // これを上回ったらレベルアップする成功率
+	MinNewKanaWords int           // 昇格までに打つ、新出かなを含む語の最低数
+	DemoteAccuracy  float64       // これを下回ると降格するかなの直近正答率
+	MinAttempts     int           // 降格判定に必要な直近試行数
 }
 
 // DefaultConfig は既定値を返す。
@@ -63,12 +65,13 @@ type Config struct {
 // はじめて降格する。
 func DefaultConfig() Config {
 	return Config{
-		TargetKPM:      120,
-		ReactionBudget: time.Second,
-		WindowSize:     100,
-		PromoteRate:    0.95,
-		DemoteAccuracy: 0.70,
-		MinAttempts:    recentWindow,
+		TargetKPM:       120,
+		ReactionBudget:  time.Second,
+		WindowSize:      100,
+		PromoteRate:     0.95,
+		MinNewKanaWords: 50,
+		DemoteAccuracy:  0.70,
+		MinAttempts:     recentWindow,
 	}
 }
 
@@ -78,11 +81,13 @@ type Drill struct {
 	Level int
 	Stats map[string]*UnitStat
 
-	word       []string
-	pos        int
-	wordErrors int
-	shownAt    time.Time
-	results    []bool // 直近 WindowSize 単語の成否
+	word          []string
+	pos           int
+	wordErrors    int
+	shownAt       time.Time
+	results       []bool // 直近 WindowSize 単語の成否
+	newKanaWords  int    // このレベルで打った、新出かなを含む語の数
+	newKanaSupply int    // 新出かなを含む語が辞書に何語あるか。負なら不明
 }
 
 // New は練習状態を作る。
@@ -96,11 +101,54 @@ func New(cfg Config, level int, stats map[string]*UnitStat) *Drill {
 	if level > curriculum.MaxLevel() {
 		level = curriculum.MaxLevel()
 	}
-	return &Drill{Cfg: cfg, Level: level, Stats: stats}
+	return &Drill{Cfg: cfg, Level: level, Stats: stats, newKanaSupply: -1}
 }
 
 // Allowed は現在のレベルで使えるかなを返す。
 func (d *Drill) Allowed() []string { return curriculum.For(d.Level) }
+
+// Stage は現在のレベルの出題条件を返す。
+func (d *Drill) Stage() curriculum.Stage { return curriculum.StageFor(d.Level) }
+
+// Newest はいちばん新しく増えたかなを返す。
+func (d *Drill) Newest() string {
+	allowed := d.Allowed()
+	return allowed[len(allowed)-1]
+}
+
+// NewKanaWords はこのレベルで打った、新出かなを含む語の数を返す。
+func (d *Drill) NewKanaWords() int { return d.newKanaWords }
+
+// SetNewKanaSupply は新出かなを含む語が辞書に何語あるかを教える。
+// 語彙の少ないかなでゲートが満たせなくなるのを防ぐのに使う。
+func (d *Drill) SetNewKanaSupply(n int) { d.newKanaSupply = n }
+
+// supplyFactor は語彙の少ないかなのゲートの倍率。
+// 辞書に4語しかなければ 4×5=20 語打てば足りる。
+const supplyFactor = 5
+
+// GateTarget は昇格までに打つべき、新出かなを含む語の数を返す。
+func (d *Drill) GateTarget() int {
+	target := d.Cfg.MinNewKanaWords
+	if d.newKanaSupply >= 0 {
+		target = min(target, d.newKanaSupply*supplyFactor)
+	}
+	return target
+}
+
+// Progress は保存のために成功率の窓とゲートのカウンタを返す。
+func (d *Drill) Progress() (results []bool, newKanaWords int) {
+	return d.results, d.newKanaWords
+}
+
+// SetProgress は保存されていた進捗を復元する。
+func (d *Drill) SetProgress(results []bool, newKanaWords int) {
+	if len(results) > d.Cfg.WindowSize {
+		results = results[len(results)-d.Cfg.WindowSize:]
+	}
+	d.results = results
+	d.newKanaWords = max(newKanaWords, 0)
+}
 
 // StartWord は新しい単語を出題する。now は表示した時刻。
 func (d *Drill) StartWord(units []string, now time.Time) {
@@ -215,6 +263,8 @@ type WordResult struct {
 	Threshold time.Duration
 	Errors    int
 	Promoted  bool
+	// KanaAdded は昇格でかなが増えたことを示す。false の昇格は長さの解放。
+	KanaAdded bool
 	Demoted   bool
 	// WeakUnit は降格の原因になったかな。
 	WeakUnit string
@@ -232,6 +282,9 @@ func (d *Drill) FinishWord(now time.Time) WordResult {
 	d.results = append(d.results, out.Success)
 	if len(d.results) > d.Cfg.WindowSize {
 		d.results = d.results[len(d.results)-d.Cfg.WindowSize:]
+	}
+	if slices.Contains(d.word, d.Newest()) {
+		d.newKanaWords++
 	}
 
 	// 正答率が下がったかなが出たら1つ降格する。
@@ -255,13 +308,18 @@ func (d *Drill) FinishWord(now time.Time) WordResult {
 		}
 	}
 
-	// 窓が埋まっていて成功率が基準を上回ったらレベルアップ
+	// 窓が埋まっていて成功率が基準を上回り、新出かなを含む語も
+	// 十分に打っていたらレベルアップ
 	if successes, total := d.SuccessCount(); total >= d.Cfg.WindowSize &&
 		float64(successes)/float64(total) > d.Cfg.PromoteRate &&
+		d.newKanaWords >= d.GateTarget() &&
 		d.Level < curriculum.MaxLevel() {
+		before := len(d.Allowed())
 		d.Level++
 		out.Promoted = true
+		out.KanaAdded = len(d.Allowed()) > before
 		d.results = nil
+		d.newKanaWords = 0
 	}
 	return out
 }
@@ -269,6 +327,7 @@ func (d *Drill) FinishWord(now time.Time) WordResult {
 // resetProgress は降格時に判定の記録を捨て、連鎖降格を防ぐ。
 func (d *Drill) resetProgress() {
 	d.results = nil
+	d.newKanaWords = 0
 	for _, st := range d.Stats {
 		st.Recent = nil
 	}

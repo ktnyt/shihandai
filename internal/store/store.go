@@ -16,6 +16,10 @@ import (
 type State struct {
 	Level int                        `json:"level"`
 	Stats map[string]*drill.UnitStat `json:"stats"`
+	// Results は成功率を測る直近の単語の成否。
+	Results []bool `json:"results,omitempty"`
+	// NewKanaWords はこのレベルで打った、新出かなを含む語の数。
+	NewKanaWords int `json:"new_kana_words,omitempty"`
 }
 
 // DefaultPath は保存先のパスを返す。

@@ -25,6 +25,7 @@ type Model struct {
 
 	paused    bool
 	leveledUp bool // レベルアップ画面を表示中
+	kanaAdded bool // 直近の昇格でかなが増えた（false なら長さの解放）
 	width     int
 	message   string
 	flash     string
@@ -152,6 +153,7 @@ func (m *Model) handleEmissions(ems []naginata.Emission, now time.Time) tea.Cmd 
 			if out.Promoted {
 				// 次の単語は出さず、レベルアップ画面で Space を待つ
 				m.leveledUp = true
+				m.kanaAdded = out.KanaAdded
 				m.engine.Reset()
 				return saveCmd
 			}
@@ -167,7 +169,10 @@ func (m *Model) handleEmissions(ems []naginata.Emission, now time.Time) tea.Cmd 
 
 // newWord は現在のレベルに合った単語を辞書から選んで出題する。
 func (m *Model) newWord(now time.Time) error {
-	word, err := m.gen.Word(m.drill.Allowed(), m.focusUnits())
+	allowed := m.drill.Allowed()
+	// 新出かなの語彙が薄いときにゲートを緩めるため、供給量を教えておく
+	m.drill.SetNewKanaSupply(m.gen.CountWithUnit(allowed, m.drill.Newest()))
+	word, err := m.gen.Word(allowed, m.focusUnits(), m.drill.Stage().MaxLen)
 	if err != nil {
 		return err
 	}
@@ -210,7 +215,13 @@ func (m *Model) save() tea.Cmd {
 	if m.statePath == "" {
 		return nil
 	}
-	data, err := store.Encode(store.State{Level: m.drill.Level, Stats: m.drill.Stats})
+	results, newKanaWords := m.drill.Progress()
+	data, err := store.Encode(store.State{
+		Level:        m.drill.Level,
+		Stats:        m.drill.Stats,
+		Results:      results,
+		NewKanaWords: newKanaWords,
+	})
 	if err != nil {
 		m.message = "保存に失敗: " + err.Error()
 		return nil

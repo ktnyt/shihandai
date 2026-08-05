@@ -137,6 +137,7 @@ func TestPromoteAfterWindowFilledWithSuccess(t *testing.T) {
 	engine := naginata.NewEngine(80 * time.Millisecond)
 	cfg := drill.DefaultConfig()
 	cfg.WindowSize = 5
+	cfg.MinNewKanaWords = 0
 	d := drill.New(cfg, 1, nil)
 	gen := lesson.NewGenerator(lesson.DefaultConfig(), rand.New(rand.NewSource(1)))
 	m, err := New(engine, d, gen, "")
@@ -151,10 +152,9 @@ func TestPromoteAfterWindowFilledWithSuccess(t *testing.T) {
 		t.Fatalf("Level = %d, want 2 (窓が成功で埋まったら昇格)", m.drill.Level)
 	}
 
-	// レベルアップ画面が出て、新しいかなが紹介される
+	// レベルアップ画面が出る。レベル1→2はかな追加ではなく長さの解放
 	view := m.View()
-	newest := m.drill.Allowed()[len(m.drill.Allowed())-1]
-	for _, want := range []string{"レベルアップ", "あたらしいかな", newest, "Space"} {
+	for _, want := range []string{"レベルアップ", "ながさ", "Space"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("レベルアップ画面に %q がない:\n%s", want, view)
 		}
@@ -187,6 +187,7 @@ func TestEscOnLevelUpScreenQuits(t *testing.T) {
 	engine := naginata.NewEngine(80 * time.Millisecond)
 	cfg := drill.DefaultConfig()
 	cfg.WindowSize = 2
+	cfg.MinNewKanaWords = 0
 	d := drill.New(cfg, 1, nil)
 	gen := lesson.NewGenerator(lesson.DefaultConfig(), rand.New(rand.NewSource(1)))
 	m, err := New(engine, d, gen, "")
@@ -303,5 +304,19 @@ func TestCtrlCQuitsImmediately(t *testing.T) {
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if cmd == nil {
 		t.Fatal("Ctrl+C で終了コマンドが返らない")
+	}
+}
+
+func TestLevelUpScreenShowsNewKana(t *testing.T) {
+	// かなが増える昇格ではレベルアップ画面に新しいかなが出る
+	m := newTestModel(t)
+	m.leveledUp = true
+	m.kanaAdded = true
+	view := m.View()
+	newest := m.drill.Newest()
+	for _, want := range []string{"あたらしいかな", newest} {
+		if !strings.Contains(view, want) {
+			t.Errorf("かな追加の画面に %q がない:\n%s", want, view)
+		}
 	}
 }

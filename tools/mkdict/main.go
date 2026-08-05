@@ -82,7 +82,7 @@ func keepPOS(f []string) bool {
 	switch pos1 {
 	case "名詞":
 		switch pos2 {
-		case "一般", "サ変接続", "副詞可能", "形容動詞語幹", "代名詞":
+		case "一般", "サ変接続", "副詞可能", "形容動詞語幹", "代名詞", "数":
 			return true
 		}
 		return false
@@ -156,9 +156,54 @@ func run(dir, outPath string, n int) error {
 		}
 		return strings.Compare(a.reading, b.reading)
 	})
-	if len(entries) > n {
-		entries = entries[:n]
+
+	// 頻度上位 n 語を基本にしつつ、語が足りないかなは全体から補充する。
+	// 珍しい拗音や外来音でも練習できるだけの語数を確保するため。
+	const perUnitTarget = 50
+	unitsOf := func(reading string) []string {
+		units, _ := lesson.Segment(reading, universe)
+		return units
 	}
+	selected := make([]entry, 0, n)
+	picked := map[string]bool{}
+	unitCount := map[string]int{}
+	add := func(e entry) {
+		if picked[e.reading] {
+			return
+		}
+		picked[e.reading] = true
+		selected = append(selected, e)
+		seen := map[string]bool{}
+		for _, u := range unitsOf(e.reading) {
+			if !seen[u] {
+				unitCount[u]++
+				seen[u] = true
+			}
+		}
+	}
+	for _, e := range entries[:min(n, len(entries))] {
+		add(e)
+	}
+	for _, unit := range universe {
+		if unitCount[unit] >= perUnitTarget {
+			continue
+		}
+		for _, e := range entries {
+			if unitCount[unit] >= perUnitTarget {
+				break
+			}
+			if !picked[e.reading] && slices.Contains(unitsOf(e.reading), unit) {
+				add(e)
+			}
+		}
+	}
+	slices.SortFunc(selected, func(a, b entry) int {
+		if a.cost != b.cost {
+			return a.cost - b.cost
+		}
+		return strings.Compare(a.reading, b.reading)
+	})
+	entries = selected
 
 	var b strings.Builder
 	b.WriteString("# shihandai 練習用単語リスト（頻度順）\n")
