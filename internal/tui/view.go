@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/truncate"
 
 	"github.com/ktnyt/shihandai/internal/curriculum"
 	"github.com/ktnyt/shihandai/internal/naginata"
@@ -77,7 +78,8 @@ func (m Model) content() string {
 		return b.String()
 	}
 
-	// 出題中の単語（入力済み、現在位置、残りで塗り分け）。
+	// 出題中の単語（入力済み、現在位置、残りで塗り分け）に続けて、
+	// 先の単語を薄く並べる。打ち終わると右から左に流れてくる。
 	// 一時停止中はレイアウトを保ったまま伏せ字にする
 	pos := m.drill.Pos()
 	var wordView strings.Builder
@@ -95,7 +97,14 @@ func (m Model) content() string {
 			wordView.WriteString(styleTodo.Render(u))
 		}
 	}
-	b.WriteString("  " + wordView.String() + "\n\n")
+	for _, w := range m.upcoming {
+		text := strings.Join(w, "")
+		if m.paused {
+			text = mask(text)
+		}
+		wordView.WriteString("  " + styleFaint.Render(text))
+	}
+	b.WriteString("  " + truncate.String(wordView.String(), uint(m.contentWidth()-2)) + "\n\n")
 
 	// 次に打つかなの運指ヒント。一時停止・インターバル中は代わりに案内を出す
 	switch {

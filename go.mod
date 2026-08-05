@@ -5,6 +5,7 @@ go 1.25.4
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/muesli/reflow v0.3.0
 )
 
 require (

@@ -34,7 +34,13 @@ type Model struct {
 	message   string
 	flash     string
 	err       error
+
+	upcoming   [][]string // 先の単語。右から左に流れてくる
+	queueLevel int        // upcoming を作ったときのレベル
 }
+
+// queueLen は先読みしておく単語の数。
+const queueLen = 4
 
 // New は画面を作り、最初の単語を出題する。
 // interval は単語を打ち終えてから次の単語が出るまでの間で、
@@ -202,18 +208,41 @@ func (m *Model) handleEmissions(ems []naginata.Emission, now time.Time) tea.Cmd 
 	return nil
 }
 
-// newWord は現在のレベルに合った単語を辞書から選んで出題する。
+// newWord は先読みキューの先頭を出題し、キューを補充する。
 func (m *Model) newWord(now time.Time) error {
 	allowed := m.drill.Allowed()
 	// 新出かなの語彙が薄いときにゲートを緩めるため、供給量を教えておく
 	m.drill.SetNewKanaSupply(m.gen.CountWithUnit(allowed, m.drill.Newest()))
-	word, err := m.gen.Word(allowed, m.focusUnits(), m.drill.Stage().MaxLen)
-	if err != nil {
+
+	// レベルが変わっていたら、古い条件で選んだ先読みは捨てる
+	if m.queueLevel != m.drill.Level {
+		m.upcoming = nil
+		m.queueLevel = m.drill.Level
+	}
+	if err := m.fillQueue(); err != nil {
 		return err
 	}
+	word := m.upcoming[0]
+	m.upcoming = m.upcoming[1:]
+	if err := m.fillQueue(); err != nil {
+		return err
+	}
+
 	m.engine.Reset() // 前の単語の打ちかけを持ち越さない
 	m.drill.StartWord(word, now)
 	m.flash = ""
+	return nil
+}
+
+// fillQueue は先読みキューを queueLen 語まで補充する。
+func (m *Model) fillQueue() error {
+	for len(m.upcoming) < queueLen {
+		word, err := m.gen.Word(m.drill.Allowed(), m.focusUnits(), m.drill.Stage().MaxLen)
+		if err != nil {
+			return err
+		}
+		m.upcoming = append(m.upcoming, word)
+	}
 	return nil
 }
 

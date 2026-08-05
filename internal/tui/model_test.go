@@ -443,3 +443,55 @@ func TestIntervalBetweenWords(t *testing.T) {
 		t.Errorf("インターバル後の単語が判定されていない")
 	}
 }
+
+func TestUpcomingWordsQueued(t *testing.T) {
+	m := newTestModel(t)
+	if len(m.upcoming) != queueLen {
+		t.Fatalf("先読みが %d 語 (want %d)", len(m.upcoming), queueLen)
+	}
+	// 先頭の先読み語が画面に見えている
+	next := strings.Join(m.upcoming[0], "")
+	if !strings.Contains(m.View(), next) {
+		t.Errorf("先読み語 %q が表示されていない:\n%s", next, m.View())
+	}
+}
+
+func TestNextWordComesFromQueue(t *testing.T) {
+	m := newTestModel(t)
+	expected := m.upcoming[0]
+
+	m = typeWord(t, m)
+	if !slices.Equal(m.drill.Word(), expected) {
+		t.Fatalf("次の単語が先読みと違う: %v, want %v", m.drill.Word(), expected)
+	}
+}
+
+func TestQueueRefreshedOnLevelChange(t *testing.T) {
+	engine := naginata.NewEngine(80 * time.Millisecond)
+	cfg := drill.DefaultConfig()
+	cfg.WindowSize = 5
+	cfg.MinNewKanaWords = 0
+	d := drill.New(cfg, 1, nil)
+	gen := lesson.NewGenerator(lesson.DefaultConfig(), rand.New(rand.NewSource(1)))
+	m, err := New(engine, d, gen, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range cfg.WindowSize {
+		m = typeWord(t, m)
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}})
+	m = next.(Model)
+
+	if m.queueLevel != m.drill.Level {
+		t.Fatalf("キューのレベルが更新されていない: %d != %d", m.queueLevel, m.drill.Level)
+	}
+	allowed := m.drill.Allowed()
+	for _, w := range append([][]string{m.drill.Word()}, m.upcoming...) {
+		for _, u := range w {
+			if !slices.Contains(allowed, u) {
+				t.Errorf("新レベルで使えないかな %q が残っている: %v", u, w)
+			}
+		}
+	}
+}
