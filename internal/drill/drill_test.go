@@ -392,13 +392,13 @@ func TestProgressRoundtrip(t *testing.T) {
 	}
 }
 
-func TestWindowKPMUsesElapsedTime(t *testing.T) {
+func TestWindowKPMSubtractsReaction(t *testing.T) {
 	cfg := DefaultConfig()
 	d := New(cfg, 1, nil)
 
-	// 表示から打ち終わりまでの素の時間で計算する
-	typeWord(d, []string{"あ", "る"}, time.Second)
+	// 経過1.5秒のうち反応の猶予0.5秒を引いた1秒が打鍵時間になる
+	typeWord(d, []string{"あ", "る"}, 1500*time.Millisecond)
 	if got := d.WindowKPM(); got != 120 {
-		t.Errorf("WindowKPM = %.0f, want 120 (2打鍵/1秒)", got)
+		t.Errorf("WindowKPM = %.0f, want 120 (2打鍵/(1.5s-0.5s))", got)
 	}
 }
