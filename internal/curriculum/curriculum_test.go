@@ -22,9 +22,9 @@ func TestForStartsWithAinasuru(t *testing.T) {
 func TestStageLengthProgression(t *testing.T) {
 	// かな1文字ごとに 2→3→4→5 文字の4段階を踏む
 	tests := []struct {
-		level    int
-		kana     int
-		maxLen   int
+		level  int
+		kana   int
+		maxLen int
 	}{
 		{1, 5, 2},
 		{2, 5, 3},
