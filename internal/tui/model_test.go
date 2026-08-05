@@ -345,3 +345,26 @@ func TestViewCentersInTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestProgressBarShowsWindow(t *testing.T) {
+	m := newTestModel(t)
+
+	// まだ何も打っていない: 残り枠だけ
+	view := m.View()
+	if !strings.Contains(view, "░") {
+		t.Errorf("残り枠が描かれていない:\n%s", view)
+	}
+	if strings.Contains(view, "█") {
+		t.Errorf("打つ前から成功・失敗が描かれている:\n%s", view)
+	}
+
+	// 1語成功すると最低1マスの成功が見える
+	m = typeWord(t, m)
+	view = m.View()
+	if !strings.Contains(view, "█") {
+		t.Errorf("成功のマスが描かれていない:\n%s", view)
+	}
+	if !strings.Contains(view, "░") {
+		t.Errorf("窓が埋まっていないのに残り枠が消えた:\n%s", view)
+	}
+}

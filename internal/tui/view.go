@@ -128,6 +128,7 @@ func (m Model) content() string {
 	fmt.Fprintf(&b, "\n  %s   ミス %d\n", timer, m.drill.WordErrors())
 
 	successes, total := m.drill.SuccessCount()
+	b.WriteString("  " + m.progressBar(successes, total-successes) + "\n")
 	rate := "-"
 	if total > 0 {
 		rate = fmt.Sprintf("%.0f%%", float64(successes)/float64(total)*100)
@@ -210,6 +211,34 @@ func wrapKana(units []string, width int) string {
 		}
 	}
 	return joined
+}
+
+// progressBar は成功率の窓を棒で描く。緑が成功、赤が失敗、
+// 薄い部分が窓の残り（まだ打っていない分）。
+func (m Model) progressBar(successes, failures int) string {
+	window := m.drill.Cfg.WindowSize
+	width := m.contentWidth() - 4
+	if window <= 0 || width < 10 {
+		return ""
+	}
+
+	sw := successes * width / window
+	fw := failures * width / window
+	// 1語でもあれば最低1マスは見えるようにする
+	if successes > 0 && sw == 0 {
+		sw = 1
+	}
+	if failures > 0 && fw == 0 {
+		fw = 1
+	}
+	if over := sw + fw - width; over > 0 {
+		sw -= over
+	}
+	rest := width - sw - fw
+
+	return styleDone.Render(strings.Repeat("█", sw)) +
+		styleError.Render(strings.Repeat("█", fw)) +
+		styleFaint.Render(strings.Repeat("░", rest))
 }
 
 // maxLenLabel は長さ制限の表示名を返す。
