@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useState } from "preact/hooks";
+import { useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks";
 import { Engine } from "./lib/engine";
 import { Drill, DEFAULT_DRILL_CONFIG, recentAccuracy } from "./lib/drill";
 import { Generator } from "./lib/lesson";
@@ -32,7 +32,11 @@ function applySettings(session: Session, s: Settings): void {
   session.upcomingWords = s.upcomingWords;
 }
 
-function createSession(settings: Settings, onChange: () => void): Session {
+function createSession(
+  settings: Settings,
+  onChange: () => void,
+  onSaved: () => void,
+): Session {
   const cfg = { ...DEFAULT_DRILL_CONFIG };
   cfg.targetKPM = settings.targetKPM;
   cfg.maxMissRate = settings.maxMissRate;
@@ -57,6 +61,7 @@ function createSession(settings: Settings, onChange: () => void): Session {
       onSave: () => {
         const { records, newKanaWords } = drill.progress();
         store.save({ level: drill.level, stats: drill.stats, records, newKanaWords });
+        onSaved();
       },
     },
   );
@@ -67,8 +72,35 @@ export function App() {
   const [, bump] = useReducer((x: number) => x + 1, 0);
   const [settings, setSettings] = useState(() => loadSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const session = useMemo(() => createSession(loadSettings(), () => bump(0)), []);
+  const syncUrlRef = useRef<() => void>(() => {});
+  const session = useMemo(
+    () => createSession(loadSettings(), () => bump(0), () => syncUrlRef.current()),
+    [],
+  );
   const drill = session.drill;
+
+  // 進捗が保存されるたびにアドレスバーのURLを最新の共有リンクにする。
+  // 打鍵のじゃまをしないよう少し遅らせてまとめる
+  const settingsRef = useRef(settings);
+  const urlTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const syncUrl = () => {
+    clearTimeout(urlTimer.current);
+    urlTimer.current = setTimeout(async () => {
+      const { records, newKanaWords } = drill.progress();
+      const encoded = await encodeShare(settingsRef.current, {
+        level: drill.level,
+        stats: drill.stats,
+        records,
+        newKanaWords,
+      });
+      history.replaceState(
+        null,
+        "",
+        `${location.pathname}${location.search}#p=${encoded}`,
+      );
+    }, 500);
+  };
+  syncUrlRef.current = syncUrl;
 
   const openSettings = () => {
     session.pause();
@@ -77,8 +109,10 @@ export function App() {
   const closeSettings = () => setSettingsOpen(false);
   const changeSettings = (next: Settings) => {
     setSettings(next);
+    settingsRef.current = next;
     saveSettings(next);
     applySettings(session, next);
+    syncUrl();
     bump(0);
   };
 
@@ -168,7 +202,8 @@ export function App() {
       records,
       newKanaWords,
     });
-    const url = `${location.origin}${import.meta.env.BASE_URL}#p=${encoded}`;
+    const url = `${location.origin}${location.pathname}${location.search}#p=${encoded}`;
+    history.replaceState(null, "", `${location.pathname}${location.search}#p=${encoded}`);
     try {
       await navigator.clipboard.writeText(url);
       session.message = "共有リンクをコピーした (設定と進捗が入っている)";
