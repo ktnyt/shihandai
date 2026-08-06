@@ -64,9 +64,25 @@ h1 {
   font-weight: normal;
 }
 
+/* メタ情報や統計は項目単位で折り返す。語の途中では切らない */
 .meta {
   font-size: 0.9rem;
   margin-bottom: 0.5rem;
+}
+
+.meta,
+.stats,
+.timer {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 1.1em;
+  row-gap: 0.15em;
+}
+
+.meta > span,
+.stats > span,
+.timer > span {
+  white-space: nowrap;
 }
 
 .kana-list {
@@ -185,6 +201,18 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
+/* フッターの案内も語句単位で折り返す */
+.hints {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 1em;
+  row-gap: 0.15em;
+}
+
+.hints > span {
+  white-space: nowrap;
+}
+
 .messages {
   min-height: 4rem;
   display: flex;
@@ -217,14 +245,15 @@ footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 1rem;
+  flex-wrap: wrap; /* 極端に狭い幅ではボタンが下の行に落ちる */
+  gap: 0.5rem 1rem;
   font-size: 0.8rem;
 }
 
-/* 案内文が長くなってもボタンを潰さない。文側が折り返す */
+/* 案内文が長くなってもボタンを潰さない。
+   横幅が足りないときはボタンの行ごと下に折り返す */
 footer > .faint {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 18rem;
 }
 
 .footer-buttons {

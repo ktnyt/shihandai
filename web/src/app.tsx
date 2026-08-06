@@ -240,9 +240,12 @@ export function App() {
           shihandai <span class="sub">— 薙刀式タイピング練習</span>
         </h1>
         <div class="meta">
-          レベル {drill.level}/{maxLevel()}　かな {allowed.length}文字　ながさ{" "}
-          {stage.maxLen > 0 ? `${stage.maxLen}文字まで` : "せいげんなし"}
-          {`　いまの段階: ${groupOf(newest)}`}
+          <span>レベル {drill.level}/{maxLevel()}</span>
+          <span>かな {allowed.length}文字</span>
+          <span>
+            ながさ {stage.maxLen > 0 ? `${stage.maxLen}文字まで` : "せいげんなし"}
+          </span>
+          <span>いまの段階: {groupOf(newest)}</span>
         </div>
         <div class="kana-list">
           使えるかな: {allowed.join(" ")}
@@ -271,10 +274,12 @@ export function App() {
           <WordStream session={session} />
           <HintLine session={session} />
           <div class="timer">
-            {session.state === "typing"
-              ? `${(drill.elapsedMs(performance.now()) / 1000).toFixed(1)}s`
-              : "--.-s"}
-            {`　ミス ${drill.currentErrors()}`}
+            <span>
+              {session.state === "typing"
+                ? `${(drill.elapsedMs(performance.now()) / 1000).toFixed(1)}s`
+                : "--.-s"}
+            </span>
+            <span>ミス {drill.currentErrors()}</span>
           </div>
         </section>
       )}
@@ -298,8 +303,15 @@ export function App() {
           />
         </div>
         <div class="stats">
-          kpm {kpm.toFixed(0)}/{cfg.targetKPM}　ミス率 {(missRate * 100).toFixed(1)}%/
-          {(cfg.maxMissRate * 100).toFixed(1)}%　直近 {total}/{cfg.windowSize} 語
+          <span>
+            kpm {kpm.toFixed(0)}/{cfg.targetKPM}
+          </span>
+          <span>
+            ミス率 {(missRate * 100).toFixed(1)}%/{(cfg.maxMissRate * 100).toFixed(1)}%
+          </span>
+          <span>
+            直近 {total}/{cfg.windowSize} 語
+          </span>
         </div>
         <div class="faint">
           {drill.gateTarget() > 0
@@ -315,8 +327,9 @@ export function App() {
       </section>
 
       <footer>
-        <span class="faint">
-          Esc で一時停止 (停止中はもう一度で設定)　IME はオフ (直接入力) にしてお使いください
+        <span class="hints faint">
+          <span>Esc で一時停止 (停止中はもう一度で設定)</span>
+          <span>IME はオフ (直接入力) にしてお使いください</span>
         </span>
         <span class="footer-buttons">
           <button class="ghost" onClick={onShare}>

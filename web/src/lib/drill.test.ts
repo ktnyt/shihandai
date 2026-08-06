@@ -38,6 +38,43 @@ describe("Drill", () => {
     expect(d.currentPos()).toBe(0);
     expect(d.input("あ")).toBe("advance");
     expect(d.input("い")).toBe("wordDone");
+
+    // かなの成績は単語を打ち終えたときに単語単位で記録される
+    d.finishWord(1000);
+    expect(d.stats["あ"]).toMatchObject({ attempts: 1, errors: 1 });
+    expect(d.stats["い"]).toMatchObject({ attempts: 1, errors: 0 });
+  });
+
+  it("打ちかけの単語を捨ててもミスした位置は失敗として残る", () => {
+    const d = new Drill(cfgWith({}), 1);
+    d.startWord(["あ", "い"], 0);
+    d.input("い"); // ミス
+    d.abandonWord();
+
+    expect(d.stats["あ"]).toMatchObject({ attempts: 1, errors: 1 });
+    expect(d.stats["い"]).toBeUndefined();
+
+    // もう一度呼んでも、打ち終わり後に呼ばれても二重記録しない
+    d.abandonWord();
+    expect(d.stats["あ"].attempts).toBe(1);
+    d.startWord(["あ"], 0);
+    d.input("あ");
+    d.finishWord(1000);
+    d.abandonWord();
+    expect(d.stats["あ"].attempts).toBe(2);
+  });
+
+  it("同じ位置の連続ミスは1回の失敗として記録される", () => {
+    const d = new Drill(cfgWith({}), 1);
+    d.startWord(["あ", "い"], 0);
+    for (let i = 0; i < 5; i++) d.input("い"); // ミス連打
+    d.input("あ");
+    d.input("い");
+    const out = d.finishWord(1000);
+
+    expect(out.errors).toBe(5); // 昇格側のミス率はタップ単位のまま
+    expect(d.stats["あ"].recent).toEqual([false]);
+    expect(d.stats["あ"].errors).toBe(1);
   });
 
   it("成功はミスの有無だけで決まる", () => {
@@ -147,7 +184,7 @@ describe("Drill", () => {
   it("古いかなの正答率低下で降格し、連鎖しない", () => {
     const d = new Drill(cfgWith({}), 5);
     let out;
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 12; i++) {
       d.startWord(["あ"], 0);
       d.input("い"); // ミス
       d.input("あ");

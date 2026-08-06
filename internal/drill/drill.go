@@ -13,7 +13,8 @@ import (
 	"github.com/ktnyt/shihandai/internal/naginata"
 )
 
-// recentWindow は1つのかなの直近正答率を測る試行数。
+// recentWindow は1つのかなの直近正答率を測る単語数。
+// 1単語につき1回だけ記録する (同じ位置の連続ミスは1回と数える)。
 const recentWindow = 12
 
 // UnitStat は1つのかなの成績。
@@ -93,6 +94,7 @@ type Drill struct {
 	word         []string
 	pos          int
 	wordErrors   int
+	errAt        []bool // 位置ごとにミスがあったか (かなの成績は単語単位で数える)
 	shownAt      time.Time
 	records      []WordRecord // 直近 WindowSize 単語の記録
 	newKanaWords int          // このレベルで打った、新出かなを含む語の数
@@ -155,11 +157,24 @@ func (d *Drill) StartWord(units []string, now time.Time) {
 	d.word = units
 	d.pos = 0
 	d.wordErrors = 0
+	d.errAt = make([]bool, len(units))
 	d.shownAt = now
 }
 
 // Word は現在の単語を返す。
 func (d *Drill) Word() []string { return d.word }
+
+// AbandonWord は打ちかけの単語を破棄する。
+// ミスした位置だけを失敗として記録し、ミスの取り消し逃れを防ぐ。
+// クリーンな位置は単語として打ち切っていないので記録しない。
+func (d *Drill) AbandonWord() {
+	for i, unit := range d.word {
+		if i < len(d.errAt) && d.errAt[i] {
+			d.stat(unit).record(false)
+		}
+	}
+	d.errAt = nil // 二重記録を防ぐ
+}
 
 // Pos は現在の入力位置を返す。
 func (d *Drill) Pos() int { return d.pos }
@@ -220,16 +235,16 @@ func (d *Drill) Input(text string) Result {
 		return ResultIgnored
 	}
 
-	expected := d.word[d.pos]
-	if text == expected {
-		d.stat(expected).record(true)
+	if text == d.word[d.pos] {
 		d.pos++
 		if d.pos >= len(d.word) {
 			return ResultWordDone
 		}
 		return ResultAdvance
 	}
-	d.stat(expected).record(false)
+	// かなの成績はここでは記録しない。打鍵漏れで同じ位置を連続ミスしても
+	// 単語ごとに1回だけ数えるよう、FinishWord でまとめて記録する
+	d.errAt[d.pos] = true
 	d.wordErrors++
 	return ResultError
 }
@@ -317,6 +332,11 @@ func (d *Drill) FinishWord(now time.Time) WordResult {
 	if len(d.records) > d.Cfg.WindowSize {
 		d.records = d.records[len(d.records)-d.Cfg.WindowSize:]
 	}
+	// かなごとの成績は単語単位で記録する。位置ごとにミスの有無だけを見る
+	for i, unit := range d.word {
+		d.stat(unit).record(!d.errAt[i])
+	}
+	d.errAt = nil // AbandonWord が後から呼ばれても二重記録しない
 	if slices.Contains(d.word, d.Newest()) {
 		d.newKanaWords++
 	}

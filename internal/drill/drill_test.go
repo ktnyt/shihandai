@@ -43,9 +43,72 @@ func TestInputErrorDoesNotAdvance(t *testing.T) {
 	if d.WordErrors() != 1 {
 		t.Errorf("WordErrors() = %d, want 1", d.WordErrors())
 	}
-	// ミスは打つべきだったかなに記録される
-	if s := d.Stats["あ"]; s == nil || s.Errors != 1 {
-		t.Errorf("Stats[あ] = %+v, want 1 error", s)
+
+	// かなの成績は単語を打ち終えたときに記録される
+	d.Input("あ")
+	d.Input("い")
+	d.FinishWord(time.Unix(1, 0))
+	if s := d.Stats["あ"]; s == nil || s.Errors != 1 || s.Attempts != 1 {
+		t.Errorf("Stats[あ] = %+v, want 1 attempt / 1 error", s)
+	}
+	if s := d.Stats["い"]; s == nil || s.Errors != 0 || s.Attempts != 1 {
+		t.Errorf("Stats[い] = %+v, want 1 attempt / 0 error", s)
+	}
+}
+
+func TestConsecutiveMissesCountOncePerWord(t *testing.T) {
+	// 打鍵漏れからの連続入力で同じ位置を何度ミスしても、
+	// かなの成績には1回の失敗としてしか残らない
+	d := New(DefaultConfig(), 1, nil)
+	d.StartWord([]string{"あ", "い"}, time.Unix(0, 0))
+	for range 5 {
+		d.Input("い") // ミス連打
+	}
+	d.Input("あ")
+	d.Input("い")
+	out := d.FinishWord(time.Unix(1, 0))
+
+	if out.Errors != 5 {
+		t.Errorf("WordResult.Errors = %d, want 5 (昇格側のミス率はタップ単位のまま)", out.Errors)
+	}
+	s := d.Stats["あ"]
+	if s == nil || s.Errors != 1 || len(s.Recent) != 1 || s.Recent[0] {
+		t.Errorf("Stats[あ] = %+v, want 1回の失敗だけ", s)
+	}
+}
+
+func TestAbandonWordRecordsMisses(t *testing.T) {
+	// 打ちかけの単語を捨てても、ミスした位置は失敗として残る
+	d := New(DefaultConfig(), 1, nil)
+	d.StartWord([]string{"あ", "い"}, time.Unix(0, 0))
+	d.Input("い") // ミス
+	d.AbandonWord()
+
+	if s := d.Stats["あ"]; s == nil || s.Errors != 1 || len(s.Recent) != 1 {
+		t.Errorf("Stats[あ] = %+v, want 1回の失敗", s)
+	}
+	if s := d.Stats["い"]; s != nil && s.Attempts != 0 {
+		t.Errorf("打っていない位置が記録された: %+v", s)
+	}
+
+	// もう一度呼んでも二重記録しない
+	d.AbandonWord()
+	if s := d.Stats["あ"]; s.Errors != 1 {
+		t.Errorf("二重記録された: %+v", s)
+	}
+}
+
+func TestFinishThenAbandonDoesNotDoubleCount(t *testing.T) {
+	// 打ち終わった後に破棄が呼ばれても二重記録しない
+	d := New(DefaultConfig(), 1, nil)
+	d.StartWord([]string{"あ"}, time.Unix(0, 0))
+	d.Input("い") // ミス
+	d.Input("あ")
+	d.FinishWord(time.Unix(1, 0))
+	d.AbandonWord()
+
+	if s := d.Stats["あ"]; s.Attempts != 1 || s.Errors != 1 {
+		t.Errorf("Stats[あ] = %+v, want 1 attempt / 1 error", s)
 	}
 }
 
@@ -265,11 +328,11 @@ func TestDemoteOnLowAccuracy(t *testing.T) {
 	cfg := DefaultConfig()
 	d := New(cfg, 5, nil)
 
-	// 「あ」を直近で大量にミスさせる。1語につき試行が2回（ミスと打ち直し）
-	// 記録されるので、MinAttempts/2 語で降格判定に届く
+	// 「あ」をミスした単語を重ねる。記録は単語単位なので、
+	// MinAttempts 語で降格判定に届く
 	start := time.Unix(0, 0)
 	var out WordResult
-	for range cfg.MinAttempts / 2 {
+	for range cfg.MinAttempts {
 		d.StartWord([]string{"あ"}, start)
 		d.Input("い") // ミス
 		d.Input("あ")
@@ -277,7 +340,7 @@ func TestDemoteOnLowAccuracy(t *testing.T) {
 	}
 
 	if !out.Demoted {
-		t.Fatalf("正答率50%%で降格しなかった: %+v", out)
+		t.Fatalf("全語ミスなのに降格しなかった: %+v", out)
 	}
 	if out.WeakUnit != "あ" {
 		t.Errorf("WeakUnit = %q, want あ", out.WeakUnit)

@@ -89,6 +89,8 @@ export class Session {
     this.engine.reset();
     this.flash = "";
     this.state = "typing";
+    // 打ちかけを破棄して次の単語へ。ミスした位置は記録に残す
+    this.drill.abandonWord();
     this.newWord(this.opts.now());
     this.opts.onChange();
   }

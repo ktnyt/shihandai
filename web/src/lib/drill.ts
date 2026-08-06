@@ -7,7 +7,8 @@ import { count } from "./keys";
 import { chordFor } from "./table";
 import { maxLevel, stageFor, unitsFor, type Stage } from "./curriculum";
 
-// 1つのかなの直近正答率を測る試行数。
+// 1つのかなの直近正答率を測る単語数。
+// 1単語につき1回だけ記録する (同じ位置の連続ミスは1回と数える)。
 const RECENT_WINDOW = 12;
 
 export interface UnitStat {
@@ -74,6 +75,7 @@ export class Drill {
   private word: string[] = [];
   private pos = 0;
   private wordErrors = 0;
+  private errAt: boolean[] = []; // 位置ごとにミスがあったか (成績は単語単位で数える)
   private pendingError = false; // バックスペース修正待ち
   private shownAt: number | null = null;
   private records: WordRecord[] = [];
@@ -129,12 +131,22 @@ export class Drill {
     this.word = units;
     this.pos = 0;
     this.wordErrors = 0;
+    this.errAt = units.map(() => false);
     this.pendingError = false;
     this.shownAt = nowMs;
   }
 
   currentWord(): string[] {
     return this.word;
+  }
+
+  // 打ちかけの単語を破棄する。ミスした位置だけを失敗として記録し、
+  // 一時停止からの再開でミスが消えるのを防ぐ。
+  abandonWord(): void {
+    this.word.forEach((unit, i) => {
+      if (this.errAt[i]) this.record(unit, false);
+    });
+    this.errAt = []; // 二重記録を防ぐ
   }
 
   currentPos(): number {
@@ -183,13 +195,13 @@ export class Drill {
     if (text === " " || text === "\b" || text === "\n" || text === "") {
       return "ignored";
     }
-    const expected = this.word[this.pos];
-    if (text === expected) {
-      this.record(expected, true);
+    if (text === this.word[this.pos]) {
       this.pos++;
       return this.pos >= this.word.length ? "wordDone" : "advance";
     }
-    this.record(expected, false);
+    // かなの成績はここでは記録しない。打鍵漏れで同じ位置を連続ミスしても
+    // 単語ごとに1回だけ数えるよう、finishWord でまとめて記録する
+    this.errAt[this.pos] = true;
     this.wordErrors++;
     if (this.cfg.requireBackspace) {
       this.pendingError = true;
@@ -273,6 +285,9 @@ export class Drill {
     if (this.word.includes(this.newest())) {
       this.newKanaWordCount++;
     }
+    // かなごとの成績は単語単位で記録する。位置ごとにミスの有無だけを見る
+    this.word.forEach((unit, i) => this.record(unit, !this.errAt[i]));
+    this.errAt = []; // abandonWord が後から呼ばれても二重記録しない
 
     // 正答率が下がったかなが出たら1つ降格する。
     // 覚えている最中のいちばん新しいかなは対象外。

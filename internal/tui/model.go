@@ -169,6 +169,8 @@ func (m *Model) resume(now time.Time) {
 		m.waitUntil = now.Add(m.interval)
 		return
 	}
+	// 打ちかけを破棄して出し直す。ミスした位置は記録に残す
+	m.drill.AbandonWord()
 	m.drill.StartWord(m.drill.Word(), now)
 }
 
