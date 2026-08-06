@@ -188,7 +188,10 @@ export function App() {
 
   const onReset = () => {
     if (confirm("進捗を消して最初からやり直しますか？")) {
+      // URLに残った古い進捗も消してからリロードする
+      clearTimeout(urlTimer.current);
       store.reset();
+      history.replaceState(null, "", location.pathname + location.search);
       location.reload();
     }
   };
