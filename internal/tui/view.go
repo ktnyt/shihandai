@@ -259,20 +259,17 @@ func (m Model) progressBar(successes, failures int) string {
 		styleFaint.Render(strings.Repeat("░", rest))
 }
 
-// kpmMeterMax はメーターの右端の値。
-const kpmMeterMax = 180
-
-// kpmMeter は直近の窓の kpm を 0〜180 のメーターで描く。
-// 目標値の位置にマーカーを置き、条件を満たすまで青、満たしたら緑で塗る。
+// kpmMeter は直近の窓の kpm を 0〜目標×2 のメーターで描く。
+// 目標のマーカーが常に中央に来る。条件を満たすまで青、満たしたら緑で塗る。
 func (m Model) kpmMeter() string {
 	width := m.contentWidth() - 4
-	if width < 10 {
+	if width < 10 || m.drill.Cfg.TargetKPM <= 0 {
 		return ""
 	}
+	meterMax := m.drill.Cfg.TargetKPM * 2
 	kpm := m.drill.WindowKPM()
-	fill := int(min(kpm, kpmMeterMax) / kpmMeterMax * float64(width))
-	mark := int(m.drill.Cfg.TargetKPM / kpmMeterMax * float64(width))
-	mark = min(max(mark, 0), width-1)
+	fill := int(min(kpm, meterMax) / meterMax * float64(width))
+	mark := min(max(width/2, 0), width-1)
 
 	// 現時点の kpm が目標に達していれば緑、未達なら青で塗る
 	fillStyle := stylePending

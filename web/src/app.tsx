@@ -20,8 +20,6 @@ import {
   type Settings,
 } from "./lib/settings";
 
-const KPM_METER_MAX = 180;
-
 // 設定を練習中のセッションに反映する。
 function applySettings(session: Session, sound: SoundPlayer, s: Settings): void {
   sound.enabled = s.soundEnabled;
@@ -292,15 +290,13 @@ export function App() {
           />
           <div class="fill bad" style={{ width: pct(total - successes, cfg.windowSize) }} />
         </div>
+        {/* メーターは 0〜目標kpm×2。目標のマーカーが常に中央に来る */}
         <div class="bar meter">
           <div
             class={`fill ${kpmOK ? "ok" : "pending"}`}
-            style={{ width: pct(Math.min(kpm, KPM_METER_MAX), KPM_METER_MAX) }}
+            style={{ width: pct(Math.min(kpm, cfg.targetKPM * 2), cfg.targetKPM * 2) }}
           />
-          <div
-            class="marker"
-            style={{ left: pct(cfg.targetKPM, KPM_METER_MAX) }}
-          />
+          <div class="marker" style={{ left: "50%" }} />
         </div>
         <div class="stats">
           <span>
