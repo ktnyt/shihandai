@@ -3,7 +3,7 @@
 // 出題は1単語ずつ。単語が表示された瞬間から打ち終わるまでを計測する。
 // 昇格は直近の窓の打鍵速度 (kpm) とミス率の両方が基準を満たしたとき。
 
-import { count } from "./keys";
+import { count, type KeySet } from "./keys";
 import { chordFor } from "./table";
 import { maxLevel, stageFor, unitsFor, type Stage } from "./curriculum";
 
@@ -54,6 +54,8 @@ export type InputResult =
   | "ignored"
   | "advance"
   | "error"
+  // 速すぎて同時押しに化けた入力。ミス表示はするが成績には数えない
+  | "rollover"
   | "wordDone"
   | "blocked" // バックスペース修正待ちの間のかな入力
   | "corrected"; // バックスペースで修正した
@@ -179,7 +181,7 @@ export class Drill {
     return keys;
   }
 
-  input(text: string): InputResult {
+  input(text: string, keys: KeySet = 0): InputResult {
     if (this.pos >= this.word.length) return "ignored";
 
     // 修正必須モードでは、ミスの後にバックスペースを打つまで進めない
@@ -198,6 +200,14 @@ export class Drill {
     if (text === this.word[this.pos]) {
       this.pos++;
       return this.pos >= this.word.length ? "wordDone" : "advance";
+    }
+    // 速すぎて次の打鍵を巻き込み、期待のかなの打鍵を含む同時押しに
+    // 化けた場合は、表示だけのミスにして成績には数えない
+    if (keys !== 0) {
+      const chord = chordFor(this.word[this.pos]);
+      if (chord !== undefined && (keys & chord) === chord && keys !== chord) {
+        return "rollover";
+      }
     }
     // かなの成績はここでは記録しない。打鍵漏れで同じ位置を連続ミスしても
     // 単語ごとに1回だけ数えるよう、finishWord でまとめて記録する

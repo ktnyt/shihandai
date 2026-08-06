@@ -104,10 +104,10 @@ export class Session {
     this.opts.onChange();
   }
 
-  private handleEmissions(ems: { text: string }[]): void {
+  private handleEmissions(ems: { text: string; keys: number }[]): void {
     const now = this.opts.now();
     for (const em of ems) {
-      const result = this.drill.input(em.text);
+      const result = this.drill.input(em.text, em.keys);
       switch (result) {
         case "advance":
           this.flash = "";
@@ -117,6 +117,9 @@ export class Session {
             ? `ミス: ${printable(em.text)} (BSで消してから打ち直してください)`
             : `ミス: ${printable(em.text)}`;
           this.opts.onEvent?.("error");
+          break;
+        case "rollover":
+          this.flash = `ミス: ${printable(em.text)} (同時押し・ノーカウント)`;
           break;
         case "corrected":
           this.flash = "";

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ktnyt/shihandai/internal/curriculum"
+	"github.com/ktnyt/shihandai/internal/naginata"
 )
 
 // typeWord は units の単語を出題し、正しく打ち切って結果を返す。
@@ -13,7 +14,7 @@ func typeWord(d *Drill, units []string, elapsed time.Duration) WordResult {
 	start := time.Unix(0, 0)
 	d.StartWord(units, start)
 	for _, u := range units {
-		d.Input(u)
+		d.Input(u, 0)
 	}
 	return d.FinishWord(start.Add(elapsed))
 }
@@ -22,10 +23,10 @@ func TestInputAdvancesOnMatch(t *testing.T) {
 	d := New(DefaultConfig(), 1, nil)
 	d.StartWord([]string{"あ", "い"}, time.Unix(0, 0))
 
-	if got := d.Input("あ"); got != ResultAdvance {
+	if got := d.Input("あ", 0); got != ResultAdvance {
 		t.Fatalf("Input(あ) = %v, want ResultAdvance", got)
 	}
-	if got := d.Input("い"); got != ResultWordDone {
+	if got := d.Input("い", 0); got != ResultWordDone {
 		t.Fatalf("Input(い) = %v, want ResultWordDone", got)
 	}
 }
@@ -34,7 +35,7 @@ func TestInputErrorDoesNotAdvance(t *testing.T) {
 	d := New(DefaultConfig(), 1, nil)
 	d.StartWord([]string{"あ", "い"}, time.Unix(0, 0))
 
-	if got := d.Input("い"); got != ResultError {
+	if got := d.Input("い", 0); got != ResultError {
 		t.Fatalf("Input(い) = %v, want ResultError", got)
 	}
 	if d.Pos() != 0 {
@@ -45,8 +46,8 @@ func TestInputErrorDoesNotAdvance(t *testing.T) {
 	}
 
 	// かなの成績は単語を打ち終えたときに記録される
-	d.Input("あ")
-	d.Input("い")
+	d.Input("あ", 0)
+	d.Input("い", 0)
 	d.FinishWord(time.Unix(1, 0))
 	if s := d.Stats["あ"]; s == nil || s.Errors != 1 || s.Attempts != 1 {
 		t.Errorf("Stats[あ] = %+v, want 1 attempt / 1 error", s)
@@ -62,10 +63,10 @@ func TestConsecutiveMissesCountOncePerWord(t *testing.T) {
 	d := New(DefaultConfig(), 1, nil)
 	d.StartWord([]string{"あ", "い"}, time.Unix(0, 0))
 	for range 5 {
-		d.Input("い") // ミス連打
+		d.Input("い", 0) // ミス連打
 	}
-	d.Input("あ")
-	d.Input("い")
+	d.Input("あ", 0)
+	d.Input("い", 0)
 	out := d.FinishWord(time.Unix(1, 0))
 
 	if out.Errors != 5 {
@@ -77,11 +78,51 @@ func TestConsecutiveMissesCountOncePerWord(t *testing.T) {
 	}
 }
 
+func TestRolloverChordNotCounted(t *testing.T) {
+	// 「か」(F) の直後を巻き込んで「が」(F+J) に化けた入力は、
+	// ミス表示にはなるが成績には数えない
+	d := New(DefaultConfig(), 1, nil)
+	d.StartWord([]string{"か", "あ"}, time.Unix(0, 0))
+
+	ga := naginata.Set(naginata.KeyF, naginata.KeyJ)
+	if got := d.Input("が", ga); got != ResultRollover {
+		t.Fatalf("Input(が) = %v, want ResultRollover", got)
+	}
+	if d.WordErrors() != 0 {
+		t.Errorf("WordErrors = %d, want 0", d.WordErrors())
+	}
+
+	// 打ち直せば普通に進み、成功として終わる
+	d.Input("か", 0)
+	d.Input("あ", 0)
+	out := d.FinishWord(time.Unix(1, 0))
+	if !out.Success {
+		t.Errorf("巻き込みだけの単語が失敗になった: %+v", out)
+	}
+	if s := d.Stats["か"]; s == nil || s.Errors != 0 {
+		t.Errorf("Stats[か] = %+v, want 0 error", s)
+	}
+}
+
+func TestUnrelatedChordStillCounted(t *testing.T) {
+	// 期待のかなの打鍵を含まない誤入力は普通のミス
+	d := New(DefaultConfig(), 1, nil)
+	d.StartWord([]string{"か"}, time.Unix(0, 0))
+
+	i := naginata.Set(naginata.KeyK) // 「い」: か(F) を含まない
+	if got := d.Input("い", i); got != ResultError {
+		t.Fatalf("Input(い) = %v, want ResultError", got)
+	}
+	if d.WordErrors() != 1 {
+		t.Errorf("WordErrors = %d, want 1", d.WordErrors())
+	}
+}
+
 func TestAbandonWordRecordsMisses(t *testing.T) {
 	// 打ちかけの単語を捨てても、ミスした位置は失敗として残る
 	d := New(DefaultConfig(), 1, nil)
 	d.StartWord([]string{"あ", "い"}, time.Unix(0, 0))
-	d.Input("い") // ミス
+	d.Input("い", 0) // ミス
 	d.AbandonWord()
 
 	if s := d.Stats["あ"]; s == nil || s.Errors != 1 || len(s.Recent) != 1 {
@@ -102,8 +143,8 @@ func TestFinishThenAbandonDoesNotDoubleCount(t *testing.T) {
 	// 打ち終わった後に破棄が呼ばれても二重記録しない
 	d := New(DefaultConfig(), 1, nil)
 	d.StartWord([]string{"あ"}, time.Unix(0, 0))
-	d.Input("い") // ミス
-	d.Input("あ")
+	d.Input("い", 0) // ミス
+	d.Input("あ", 0)
 	d.FinishWord(time.Unix(1, 0))
 	d.AbandonWord()
 
@@ -116,7 +157,7 @@ func TestInputIgnoresControlText(t *testing.T) {
 	d := New(DefaultConfig(), 1, nil)
 	d.StartWord([]string{"あ"}, time.Unix(0, 0))
 	for _, text := range []string{" ", "\b", "\n"} {
-		if got := d.Input(text); got != ResultIgnored {
+		if got := d.Input(text, 0); got != ResultIgnored {
 			t.Errorf("Input(%q) = %v, want ResultIgnored", text, got)
 		}
 	}
@@ -138,10 +179,10 @@ func TestFinishWordSuccessAndFailure(t *testing.T) {
 			d := New(DefaultConfig(), 1, nil)
 			d.StartWord([]string{"あ", "い"}, time.Unix(0, 0))
 			if tt.miss {
-				d.Input("い")
+				d.Input("い", 0)
 			}
-			d.Input("あ")
-			d.Input("い")
+			d.Input("あ", 0)
+			d.Input("い", 0)
 			out := d.FinishWord(time.Unix(0, 0).Add(tt.elapsed))
 			if out.Success != tt.want {
 				t.Fatalf("Success = %v, want %v (%+v)", out.Success, tt.want, out)
@@ -218,9 +259,9 @@ func TestNoPromoteWhenMissRateTooHigh(t *testing.T) {
 	start := time.Unix(0, 0)
 	for range cfg.WindowSize * 2 {
 		d.StartWord([]string{"あ", "る"}, start)
-		d.Input("い") // ミス
-		d.Input("あ")
-		d.Input("る")
+		d.Input("い", 0) // ミス
+		d.Input("あ", 0)
+		d.Input("る", 0)
 		if out := d.FinishWord(start.Add(900 * time.Millisecond)); out.Promoted {
 			t.Fatal("ミス率が高いのに昇格した")
 		}
@@ -334,8 +375,8 @@ func TestDemoteOnLowAccuracy(t *testing.T) {
 	var out WordResult
 	for range cfg.MinAttempts {
 		d.StartWord([]string{"あ"}, start)
-		d.Input("い") // ミス
-		d.Input("あ")
+		d.Input("い", 0) // ミス
+		d.Input("あ", 0)
 		out = d.FinishWord(start.Add(time.Second))
 	}
 
@@ -365,8 +406,8 @@ func TestNoDemoteOnNewestKana(t *testing.T) {
 	start := time.Unix(0, 0)
 	for range cfg.MinAttempts {
 		d.StartWord([]string{newest}, start)
-		d.Input(old) // ミス
-		d.Input(newest)
+		d.Input(old, 0) // ミス
+		d.Input(newest, 0)
 		if out := d.FinishWord(start.Add(time.Second)); out.Demoted {
 			t.Fatalf("新出かな %q のミスで降格した", newest)
 		}
@@ -402,8 +443,8 @@ func TestNoDemoteBelowLevel1(t *testing.T) {
 	var out WordResult
 	for range cfg.MinAttempts {
 		d.StartWord([]string{"あ"}, start)
-		d.Input("い")
-		d.Input("あ")
+		d.Input("い", 0)
+		d.Input("あ", 0)
 		out = d.FinishWord(start.Add(time.Second))
 	}
 	if out.Demoted || d.Level != 1 {

@@ -221,12 +221,16 @@ const (
 	ResultAdvance
 	// ResultError は誤った入力。位置は進まない。
 	ResultError
+	// ResultRollover は速すぎて同時押しに化けた入力。
+	// ミスとして表示はするが、成績には数えない。位置は進まない。
+	ResultRollover
 	// ResultWordDone は単語の最後の単位を正しく入力した。
 	ResultWordDone
 )
 
-// Input は確定した1単位を判定する。
-func (d *Drill) Input(text string) Result {
+// Input は確定した1単位を判定する。keys には確定に使われたキーの
+// 組み合わせを渡す (不明なら 0)。
+func (d *Drill) Input(text string, keys naginata.KeySet) Result {
 	if d.pos >= len(d.word) {
 		return ResultIgnored
 	}
@@ -241,6 +245,14 @@ func (d *Drill) Input(text string) Result {
 			return ResultWordDone
 		}
 		return ResultAdvance
+	}
+	// 速すぎて次の打鍵を巻き込み、期待のかなの打鍵を含む同時押しに
+	// 化けた場合は、表示だけのミスにして成績には数えない
+	if keys != 0 {
+		if chord, ok := naginata.ChordFor(d.word[d.pos]); ok &&
+			keys&chord == chord && keys != chord {
+			return ResultRollover
+		}
 	}
 	// かなの成績はここでは記録しない。打鍵漏れで同じ位置を連続ミスしても
 	// 単語ごとに1回だけ数えるよう、FinishWord でまとめて記録する

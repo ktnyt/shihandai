@@ -10,6 +10,7 @@ import { TABLE } from "./table";
 
 export interface Emission {
   text: string;
+  keys: KeySet; // 確定に使われたキーの組み合わせ
 }
 
 // 連続シフトのとき押しっぱなしを引き継ぐキー (QMK の shifted lookup 相当)。
@@ -92,13 +93,13 @@ export class Engine {
         const e = TABLE.find((e) => e.keys === sticky);
         if (e) {
           this.buf = this.buf.slice(nt);
-          return [{ text: e.text }];
+          return [{ text: e.text, keys: sticky }];
         }
       }
       const e = TABLE.find((e) => e.keys === comb);
       if (e) {
         this.buf = this.buf.slice(nt);
-        return [{ text: e.text }];
+        return [{ text: e.text, keys: comb }];
       }
     }
     this.buf.shift();

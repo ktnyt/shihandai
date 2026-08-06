@@ -177,11 +177,13 @@ func (m *Model) resume(now time.Time) {
 // handleEmissions は確定したかなを判定に流す。単語が終わったら次を出題する。
 func (m *Model) handleEmissions(ems []naginata.Emission, now time.Time) tea.Cmd {
 	for _, em := range ems {
-		switch m.drill.Input(em.Text) {
+		switch m.drill.Input(em.Text, em.Keys) {
 		case drill.ResultAdvance:
 			m.flash = ""
 		case drill.ResultError:
 			m.flash = "ミス: " + printable(em.Text)
+		case drill.ResultRollover:
+			m.flash = "ミス: " + printable(em.Text) + " (同時押し・ノーカウント)"
 		case drill.ResultWordDone:
 			out := m.drill.FinishWord(now)
 			m.message = resultMessage(out)

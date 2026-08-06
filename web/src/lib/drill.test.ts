@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_DRILL_CONFIG, Drill, type DrillConfig } from "./drill";
+import { set } from "./keys";
 import { maxLevel, stageFor, unitsFor } from "./curriculum";
 
 function cfgWith(overrides: Partial<DrillConfig>): DrillConfig {
@@ -62,6 +63,27 @@ describe("Drill", () => {
     d.finishWord(1000);
     d.abandonWord();
     expect(d.stats["あ"].attempts).toBe(2);
+  });
+
+  it("巻き込み同時押しはミス表示だけで成績に数えない", () => {
+    const d = new Drill(cfgWith({}), 1);
+    d.startWord(["か", "あ"], 0);
+
+    // 「か」(F) の直後を巻き込んで「が」(F+J=13,16) に化けた
+    expect(d.input("が", set(13, 16))).toBe("rollover");
+    expect(d.currentErrors()).toBe(0);
+
+    d.input("か");
+    d.input("あ");
+    expect(d.finishWord(1000).success).toBe(true);
+    expect(d.stats["か"].errors).toBe(0);
+  });
+
+  it("期待のかなを含まない誤入力は普通のミス", () => {
+    const d = new Drill(cfgWith({}), 1);
+    d.startWord(["か"], 0);
+    expect(d.input("い", set(17))).toBe("error"); // い=K(17) は か=F を含まない
+    expect(d.currentErrors()).toBe(1);
   });
 
   it("同じ位置の連続ミスは1回の失敗として記録される", () => {

@@ -63,7 +63,7 @@ func TestLoadDropsNullStats(t *testing.T) {
 	// 読み込んだ状態でそのまま練習しても落ちない
 	d := drill.New(drill.DefaultConfig(), got.Level, got.Stats)
 	d.StartWord([]string{"あ"}, time.Unix(0, 0))
-	if res := d.Input("あ"); res != drill.ResultWordDone {
+	if res := d.Input("あ", 0); res != drill.ResultWordDone {
 		t.Errorf("Input = %v", res)
 	}
 }

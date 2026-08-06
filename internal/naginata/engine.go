@@ -5,6 +5,7 @@ import "time"
 // Emission はエンジンが確定した1文字（または拗音などの1単位）を表す。
 type Emission struct {
 	Text string
+	Keys KeySet // 確定に使われたキーの組み合わせ
 }
 
 // Engine はキー押下の列から薙刀式のかなを確定する。
@@ -110,7 +111,7 @@ func (e *Engine) typeOnce() []Emission {
 		for _, entry := range Table {
 			if entry.Keys == comb {
 				e.buf = e.buf[nt:]
-				return []Emission{{Text: entry.Text}}
+				return []Emission{{Text: entry.Text, Keys: comb}}
 			}
 		}
 	}
