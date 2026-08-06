@@ -67,9 +67,6 @@ export interface WordResult {
   weakUnit: string; // 降格の原因になったかな
 }
 
-// 語彙の少ないかなのゲートの倍率。
-const SUPPLY_FACTOR = 5;
-
 export class Drill {
   level: number;
   stats: Record<string, UnitStat>;
@@ -81,7 +78,6 @@ export class Drill {
   private shownAt: number | null = null;
   private records: WordRecord[] = [];
   private newKanaWordCount = 0;
-  private newKanaSupply = -1;
 
   constructor(
     public cfg: DrillConfig,
@@ -113,18 +109,11 @@ export class Drill {
     return this.newKanaWordCount;
   }
 
-  setNewKanaSupply(n: number): void {
-    this.newKanaSupply = n;
-  }
-
   // 最初の5文字の段階では全部が新出なので、ゲートはかけない。
+  // それ以外は設定値そのまま (自動で緩めたりはしない)。
   gateTarget(): number {
     if (this.allowed().length === unitsFor(1).length) return 0;
-    let target = this.cfg.minNewKanaWords;
-    if (this.newKanaSupply >= 0) {
-      target = Math.min(target, this.newKanaSupply * SUPPLY_FACTOR);
-    }
-    return target;
+    return this.cfg.minNewKanaWords;
   }
 
   progress(): { records: WordRecord[]; newKanaWords: number } {

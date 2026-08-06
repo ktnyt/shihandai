@@ -44,7 +44,7 @@ func TestWordAtEveryLevel(t *testing.T) {
 	g := newGen(1)
 	for level := 1; level <= curriculum.MaxLevel(); level++ {
 		allowed := curriculum.For(level)
-		word, err := g.Word(allowed, allowed[len(allowed)-1:], 0)
+		word, err := g.Word(allowed, allowed[len(allowed)-1], nil, 0)
 		if err != nil {
 			t.Fatalf("レベル %d で単語が選べない: %v", level, err)
 		}
@@ -59,26 +59,46 @@ func TestWordAtEveryLevel(t *testing.T) {
 	}
 }
 
-func TestWordFocusBias(t *testing.T) {
+func TestWordNewestBias(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.FocusRatio = 1 // 常に focus を含む語を選ぶ
+	cfg.NewestRatio = 1 // 常に新出かなを含む語を選ぶ
+	cfg.WeakRatio = 0
 	g := NewGenerator(cfg, rand.New(rand.NewSource(1)))
 
-	focus := []string{"る"}
 	for range 20 {
-		word, err := g.Word(curriculum.For(1), focus, 0)
+		word, err := g.Word(curriculum.For(1), "る", nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !containsAny(word, focus) {
-			t.Errorf("focus %v を含まない語が出た: %v", focus, word)
+		if !slices.Contains(word, "る") {
+			t.Errorf("新出かな「る」を含まない語が出た: %v", word)
 		}
+	}
+}
+
+func TestWordNewestFrequency(t *testing.T) {
+	// 既定の設定でも新出かなを含む語が3割以上出る
+	g := newGen(5)
+	allowed := curriculum.For(40)
+	newest := allowed[len(allowed)-1]
+	hit := 0
+	for range 200 {
+		word, err := g.Word(allowed, newest, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.Contains(word, newest) {
+			hit++
+		}
+	}
+	if hit < 60 {
+		t.Errorf("新出かな %q を含む語が %d/200 しか出ていない", newest, hit)
 	}
 }
 
 func TestWordErrorWhenNoWords(t *testing.T) {
 	g := newGen(1)
-	if _, err := g.Word([]string{"っ"}, nil, 0); err == nil {
+	if _, err := g.Word([]string{"っ"}, "っ", nil, 0); err == nil {
 		t.Fatal("打てる語がないのにエラーにならない")
 	}
 }
@@ -91,7 +111,7 @@ func TestWordAvoidsImmediateRepeat(t *testing.T) {
 	repeats := 0
 	var last []string
 	for range 100 {
-		word, err := g.Word(allowed, nil, 0)
+		word, err := g.Word(allowed, "", nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -109,7 +129,7 @@ func TestWordRespectsMaxLen(t *testing.T) {
 	g := newGen(3)
 	allowed := curriculum.For(30)
 	for range 50 {
-		word, err := g.Word(allowed, nil, 2)
+		word, err := g.Word(allowed, "", nil, 2)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,20 +139,21 @@ func TestWordRespectsMaxLen(t *testing.T) {
 	}
 }
 
-func TestWordFocusFallbackBeyondMaxLen(t *testing.T) {
-	// 「ぴゃ」を含む2文字語は辞書にないので、focus を優先するときは
+func TestWordNewestFallbackBeyondMaxLen(t *testing.T) {
+	// 「ぴゃ」を含む2文字語は辞書にないので、新出かなを優先するときは
 	// 長さ制限を超えてでも出す
 	cfg := DefaultConfig()
-	cfg.FocusRatio = 1
+	cfg.NewestRatio = 1
+	cfg.WeakRatio = 0
 	g := NewGenerator(cfg, rand.New(rand.NewSource(1)))
 	allowed := curriculum.For(curriculum.MaxLevel())
 
-	word, err := g.Word(allowed, []string{"ぴゃ"}, 2)
+	word, err := g.Word(allowed, "ぴゃ", nil, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsAny(word, []string{"ぴゃ"}) {
-		t.Fatalf("focus を含まない語が出た: %v", word)
+	if !slices.Contains(word, "ぴゃ") {
+		t.Fatalf("新出かなを含まない語が出た: %v", word)
 	}
 }
 
@@ -143,7 +164,7 @@ func TestWordVariety(t *testing.T) {
 	allowed := curriculum.For(1)
 	seen := map[string]bool{}
 	for range 200 {
-		word, err := g.Word(allowed, nil, 0)
+		word, err := g.Word(allowed, "", nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

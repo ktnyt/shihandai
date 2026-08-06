@@ -90,13 +90,12 @@ type Drill struct {
 	Level int
 	Stats map[string]*UnitStat
 
-	word          []string
-	pos           int
-	wordErrors    int
-	shownAt       time.Time
-	records       []WordRecord // 直近 WindowSize 単語の記録
-	newKanaWords  int          // このレベルで打った、新出かなを含む語の数
-	newKanaSupply int          // 新出かなを含む語が辞書に何語あるか。負なら不明
+	word         []string
+	pos          int
+	wordErrors   int
+	shownAt      time.Time
+	records      []WordRecord // 直近 WindowSize 単語の記録
+	newKanaWords int          // このレベルで打った、新出かなを含む語の数
 }
 
 // New は練習状態を作る。
@@ -110,7 +109,7 @@ func New(cfg Config, level int, stats map[string]*UnitStat) *Drill {
 	if level > curriculum.MaxLevel() {
 		level = curriculum.MaxLevel()
 	}
-	return &Drill{Cfg: cfg, Level: level, Stats: stats, newKanaSupply: -1}
+	return &Drill{Cfg: cfg, Level: level, Stats: stats}
 }
 
 // Allowed は現在のレベルで使えるかなを返す。
@@ -128,25 +127,13 @@ func (d *Drill) Newest() string {
 // NewKanaWords はこのレベルで打った、新出かなを含む語の数を返す。
 func (d *Drill) NewKanaWords() int { return d.newKanaWords }
 
-// SetNewKanaSupply は新出かなを含む語が辞書に何語あるかを教える。
-// 語彙の少ないかなでゲートが満たせなくなるのを防ぐのに使う。
-func (d *Drill) SetNewKanaSupply(n int) { d.newKanaSupply = n }
-
-// supplyFactor は語彙の少ないかなのゲートの倍率。
-// 辞書に4語しかなければ 4×5=20 語打てば足りる。
-const supplyFactor = 5
-
 // GateTarget は昇格までに打つべき、新出かなを含む語の数を返す。
 // 最初の5文字の段階では全部が新出なので、ゲートはかけない。
 func (d *Drill) GateTarget() int {
 	if len(d.Allowed()) == len(curriculum.For(1)) {
 		return 0
 	}
-	target := d.Cfg.MinNewKanaWords
-	if d.newKanaSupply >= 0 {
-		target = min(target, d.newKanaSupply*supplyFactor)
-	}
-	return target
+	return d.Cfg.MinNewKanaWords
 }
 
 // Progress は保存のために判定の窓とゲートのカウンタを返す。

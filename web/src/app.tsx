@@ -226,7 +226,7 @@ export function App() {
     history.replaceState(null, "", `${location.pathname}${location.search}#p=${encoded}`);
     try {
       await navigator.clipboard.writeText(url);
-      session.message = "共有リンクをコピーした (設定と進捗が入っている)";
+      session.message = "共有リンクをコピーしました (設定と進捗が含まれます)";
     } catch {
       prompt("このURLをコピーしてください", url);
     }
@@ -260,8 +260,8 @@ export function App() {
           ) : (
             <div class="levelup-body">
               {stage.maxLen > 0
-                ? `ながさ${stage.maxLen}文字までの語がでるようになった`
-                : "ながさのせいげんがなくなった"}
+                ? `ながさ${stage.maxLen}文字までの語がでるようになりました`
+                : "ながさのせいげんがなくなりました"}
             </div>
           )}
           <div class="faint">Space ではじめる</div>
@@ -316,7 +316,7 @@ export function App() {
 
       <footer>
         <span class="faint">
-          Esc で一時停止 (停止中はもう一度で設定)　IME はオフ (直接入力) にして使う
+          Esc で一時停止 (停止中はもう一度で設定)　IME はオフ (直接入力) にしてお使いください
         </span>
         <span class="footer-buttons">
           <button class="ghost" onClick={onShare}>

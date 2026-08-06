@@ -38,12 +38,15 @@ export function segment(text: string, allowed: string[]): string[] | null {
 }
 
 export interface GeneratorConfig {
-  focusRatio: number; // 新出・苦手のかなを含む語を優先する割合
+  newestRatio: number; // 新出かなを含む語を出す割合
+  weakRatio: number; // 苦手かなを含む語を出す割合
   skew: number; // 頻度への偏り。大きいほど高頻度語に寄る
 }
 
+// 新出かなは練習の主役なので、4割は新出かなを含む語にする。
 export const DEFAULT_GENERATOR_CONFIG: GeneratorConfig = {
-  focusRatio: 0.5,
+  newestRatio: 0.4,
+  weakRatio: 0.2,
   skew: 2,
 };
 
@@ -69,30 +72,46 @@ export class Generator {
   ) {}
 
   // allowed のかなだけで打てる単語を1つ選ぶ。maxLen は最大文字数 (0で無制限)。
-  // focus を含む語が優先され、長さの範囲に focus 語がなければ範囲を超えても出す。
-  word(allowed: string[], focus: string[], maxLen: number): string[] {
+  // newest は新しく覚えているかな、weak は苦手なかな。新出かなを含む語を
+  // newestRatio、苦手かなを含む語を weakRatio の割合で優先して出す。
+  // 長さの範囲に新出かなを含む語がなければ、範囲を超えても出す。
+  word(
+    allowed: string[],
+    newest: string | null,
+    weak: string[],
+    maxLen: number,
+  ): string[] {
     const set = newUnitSet(allowed);
 
     const candidates: string[][] = [];
-    const focused: string[][] = [];
-    const focusedLong: string[][] = [];
+    const newestPool: string[][] = [];
+    const newestLong: string[][] = [];
+    const weakPool: string[][] = [];
     for (const w of this.words) {
       const units = segmentWith(set, w);
       if (units === null) continue;
+      const hasNewest = newest !== null && units.includes(newest);
       if (maxLen > 0 && units.length > maxLen) {
-        if (containsAny(units, focus)) focusedLong.push(units);
+        if (hasNewest) newestLong.push(units);
         continue;
       }
       candidates.push(units);
-      if (containsAny(units, focus)) focused.push(units);
+      if (hasNewest) newestPool.push(units);
+      else if (containsAny(units, weak)) weakPool.push(units);
     }
-    let focusPool = focused.length > 0 ? focused : focusedLong;
-    let pool = candidates.length > 0 ? candidates : focusPool;
+    const newestAny = newestPool.length > 0 ? newestPool : newestLong;
+    let pool = candidates.length > 0 ? candidates : newestAny;
     if (pool.length === 0) {
       throw new Error(`使えるかな [${allowed}] で打てる語が辞書にない`);
     }
-    if (focusPool.length > 0 && this.rand() < this.cfg.focusRatio) {
-      pool = focusPool;
+    const r = this.rand();
+    if (r < this.cfg.newestRatio && newestAny.length > 0) {
+      pool = newestAny;
+    } else if (
+      r < this.cfg.newestRatio + this.cfg.weakRatio &&
+      weakPool.length > 0
+    ) {
+      pool = weakPool;
     }
 
     // 直近に出した語は選び直す。語彙が少ないときは記憶を短くする
@@ -104,17 +123,6 @@ export class Generator {
     }
     this.remember(w);
     return w;
-  }
-
-  // allowed だけで打てる語のうち unit を含むものの数。
-  countWithUnit(allowed: string[], unit: string): number {
-    const set = newUnitSet(allowed);
-    let count = 0;
-    for (const w of this.words) {
-      const units = segmentWith(set, w);
-      if (units !== null && units.includes(unit)) count++;
-    }
-    return count;
   }
 
   private pick(n: number): number {

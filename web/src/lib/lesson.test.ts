@@ -44,39 +44,44 @@ describe("Generator", () => {
     // 全レベルは重いので代表的なレベルを確かめる
     for (const level of [1, 5, 50, 200, maxLevel()]) {
       const allowed = unitsFor(level);
-      const word = g.word(allowed, allowed.slice(-1), 0);
+      const word = g.word(allowed, allowed[allowed.length - 1], [], 0);
       expect(word.length).toBeGreaterThan(0);
       for (const u of word) expect(allowed).toContain(u);
     }
+  });
+
+  it("既定の設定でも新出かなを含む語が3割以上出る", () => {
+    const g = new Generator(words(), undefined, seededRandom(5));
+    const allowed = unitsFor(40);
+    const newest = allowed[allowed.length - 1];
+    let hit = 0;
+    for (let i = 0; i < 200; i++) {
+      if (g.word(allowed, newest, [], 0).includes(newest)) hit++;
+    }
+    expect(hit).toBeGreaterThanOrEqual(60);
   });
 
   it("最大文字数を守る", () => {
     const g = new Generator(words(), undefined, seededRandom(3));
     const allowed = unitsFor(30);
     for (let i = 0; i < 50; i++) {
-      expect(g.word(allowed, [], 2).length).toBeLessThanOrEqual(2);
+      expect(g.word(allowed, null, [], 2).length).toBeLessThanOrEqual(2);
     }
   });
 
-  it("focus を含む語がないときは長さを超えて出す", () => {
+  it("新出かなを含む語がないときは長さを超えて出す", () => {
     const g = new Generator(
       words(),
-      { focusRatio: 1, skew: 2 },
+      { newestRatio: 1, weakRatio: 0, skew: 2 },
       seededRandom(1),
     );
     const allowed = unitsFor(maxLevel());
-    const word = g.word(allowed, ["ぴゃ"], 2);
+    const word = g.word(allowed, "ぴゃ", [], 2);
     expect(word).toContain("ぴゃ");
   });
 
   it("打てる語がなければ例外", () => {
     const g = new Generator(words(), undefined, seededRandom(1));
-    expect(() => g.word(["っ"], [], 0)).toThrow();
-  });
-
-  it("countWithUnit は unit を含む語を数える", () => {
-    const g = new Generator(words(), undefined, seededRandom(1));
-    expect(g.countWithUnit(unitsFor(1), "る")).toBeGreaterThan(0);
-    expect(g.countWithUnit(["っ"], "っ")).toBe(0);
+    expect(() => g.word(["っ"], null, [], 0)).toThrow();
   });
 });

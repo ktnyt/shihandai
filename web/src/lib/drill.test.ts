@@ -129,10 +129,9 @@ describe("Drill", () => {
     expect(out!.promoted).toBe(true);
   });
 
-  it("語彙が薄いかなはゲートが緩む", () => {
-    const d = new Drill(cfgWith({ minNewKanaWords: 50 }), 5);
-    d.setNewKanaSupply(4);
-    expect(d.gateTarget()).toBe(20);
+  it("ゲートは設定値のまま固定", () => {
+    const d = new Drill(cfgWith({ minNewKanaWords: 60 }), 5);
+    expect(d.gateTarget()).toBe(60);
   });
 
   it("レベル4→5の昇格でかなが増えて2文字語に戻る", () => {

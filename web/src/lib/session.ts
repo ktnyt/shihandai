@@ -112,7 +112,7 @@ export class Session {
           break;
         case "error":
           this.flash = this.drill.needsBackspace()
-            ? `ミス: ${printable(em.text)} (BSで消してから打ち直す)`
+            ? `ミス: ${printable(em.text)} (BSで消してから打ち直してください)`
             : `ミス: ${printable(em.text)}`;
           this.opts.onEvent?.("error");
           break;
@@ -161,10 +161,6 @@ export class Session {
 
   // 先読みキューの先頭を出題し、キューを補充する。
   private newWord(now: number): void {
-    const allowed = this.drill.allowed();
-    this.drill.setNewKanaSupply(
-      this.gen.countWithUnit(allowed, this.drill.newest()),
-    );
     if (this.queueLevel !== this.drill.level) {
       this.upcoming = [];
       this.queueLevel = this.drill.level;
@@ -184,34 +180,33 @@ export class Session {
       this.upcoming.push(
         this.gen.word(
           this.drill.allowed(),
-          this.focusUnits(),
+          this.drill.newest(),
+          this.weakUnits(),
           this.drill.stage().maxLen,
         ),
       );
     }
   }
 
-  // 優先して出題したいかな (新出と苦手)。
-  private focusUnits(): string[] {
+  // 苦手なかな (直近正答率の低い順に3つ)。
+  private weakUnits(): string[] {
     const allowed = this.drill.allowed();
-    const focus = allowed.slice(-2);
-    const weak = Object.entries(this.drill.stats)
+    return Object.entries(this.drill.stats)
       .filter(([u, s]) => allowed.includes(u) && s.recent.length > 0)
       .map(([u, s]) => [u, recentAccuracy(s)] as const)
       .filter(([, acc]) => acc < 1)
       .sort((a, b) => a[1] - b[1])
       .slice(0, 3)
       .map(([u]) => u);
-    return [...focus, ...weak];
   }
 }
 
 function resultMessage(out: WordResult): string {
   if (out.demoted) {
-    return `「${out.weakUnit}」の正答率が下がったのでレベルダウン`;
+    return `「${out.weakUnit}」の正答率が下がったため、レベルダウンしました`;
   }
   if (out.promoted) {
-    return "昇格の基準をみたした! レベルアップ";
+    return "昇格基準を満たしました!";
   }
   if (out.success) {
     return `成功 ${(out.durationMs / 1000).toFixed(1)}s`;

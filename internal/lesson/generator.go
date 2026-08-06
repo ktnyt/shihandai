@@ -12,15 +12,16 @@ import (
 
 // Config は出題の調整項目。
 type Config struct {
-	FocusRatio float64 // 新出・苦手のかなを含む語を優先する割合
-	Skew       float64 // 頻度への偏り。大きいほど高頻度語に寄る
+	NewestRatio float64 // 新出かなを含む語を出す割合
+	WeakRatio   float64 // 苦手かなを含む語を出す割合
+	Skew        float64 // 頻度への偏り。大きいほど高頻度語に寄る
 }
 
 // DefaultConfig は既定値を返す。
-// Skew 2 は「上位半分の語が約6割を占める」程度のゆるい偏りで、
-// 高頻度語を優先しつつ下位の語もそれなりに出す。
+// 新出かなは練習の主役なので、4割は新出かなを含む語にする。
+// Skew 2 は「上位半分の語が約6割を占める」程度のゆるい偏り。
 func DefaultConfig() Config {
-	return Config{FocusRatio: 0.5, Skew: 2}
+	return Config{NewestRatio: 0.4, WeakRatio: 0.2, Skew: 2}
 }
 
 // recentMemory は連発を抑えるために覚えておく、直近に出した語の数。
@@ -42,53 +43,65 @@ func NewGenerator(cfg Config, rnd *rand.Rand) *Generator {
 	if cfg.Skew <= 0 {
 		cfg.Skew = DefaultConfig().Skew
 	}
-	if cfg.FocusRatio < 0 || cfg.FocusRatio > 1 {
-		cfg.FocusRatio = DefaultConfig().FocusRatio
+	if cfg.NewestRatio < 0 || cfg.NewestRatio > 1 {
+		cfg.NewestRatio = DefaultConfig().NewestRatio
+	}
+	if cfg.WeakRatio < 0 || cfg.NewestRatio+cfg.WeakRatio > 1 {
+		cfg.WeakRatio = DefaultConfig().WeakRatio
 	}
 	return &Generator{Cfg: cfg, Rand: rnd, words: dict.Words()}
 }
 
 // Word は allowed のかなだけで打てる単語を1つ選ぶ。
 // maxLen は単語の最大文字数（単位数）で、0 なら無制限。
-// focus には新しく覚えるかなや苦手なかなを渡す。それを含む語が優先される。
-func (g *Generator) Word(allowed, focus []string, maxLen int) ([]string, error) {
+// newest は新しく覚えているかな、weak は苦手なかな。新出かなを含む語を
+// NewestRatio、苦手かなを含む語を WeakRatio の割合で優先して出す。
+func (g *Generator) Word(allowed []string, newest string, weak []string, maxLen int) ([]string, error) {
 	set := newUnitSet(allowed)
 
 	// 頻度順を保ったまま、打てる語だけに絞る
 	var candidates [][]string
-	var focused [][]string
-	var focusedLong [][]string // 長さ超過だが focus を含む語（緊急用）
+	var newestPool [][]string
+	var newestLong [][]string // 長さ超過だが新出かなを含む語（緊急用）
+	var weakPool [][]string
 	for _, w := range g.words {
 		units, ok := set.segment(w)
 		if !ok {
 			continue
 		}
+		hasNewest := newest != "" && slices.Contains(units, newest)
 		if maxLen > 0 && len(units) > maxLen {
-			if containsAny(units, focus) {
-				focusedLong = append(focusedLong, units)
+			if hasNewest {
+				newestLong = append(newestLong, units)
 			}
 			continue
 		}
 		candidates = append(candidates, units)
-		if containsAny(units, focus) {
-			focused = append(focused, units)
+		if hasNewest {
+			newestPool = append(newestPool, units)
+		} else if containsAny(units, weak) {
+			weakPool = append(weakPool, units)
 		}
 	}
-	// 長さの範囲内に focus を含む語がなければ、範囲を超えても出す。
-	// 新出かなの練習が長さ制限で詰まないようにするため。
-	if len(focused) == 0 {
-		focused = focusedLong
+	// 長さの範囲内に新出かなを含む語がなければ、範囲を超えても出す。
+	// 新出かなの練習が長さ制限で詰まないようにするため
+	if len(newestPool) == 0 {
+		newestPool = newestLong
 	}
 	if len(candidates) == 0 {
-		candidates = focused
+		candidates = newestPool
 	}
 	if len(candidates) == 0 {
 		return nil, fmt.Errorf("使えるかな %v で打てる語が辞書にない", allowed)
 	}
 
 	pool := candidates
-	if len(focused) > 0 && g.Rand.Float64() < g.Cfg.FocusRatio {
-		pool = focused
+	r := g.Rand.Float64()
+	switch {
+	case r < g.Cfg.NewestRatio && len(newestPool) > 0:
+		pool = newestPool
+	case r < g.Cfg.NewestRatio+g.Cfg.WeakRatio && len(weakPool) > 0:
+		pool = weakPool
 	}
 
 	// 直近に出した語は選び直す。語彙が少ないときは記憶を短くして
@@ -118,19 +131,6 @@ func (g *Generator) remember(units []string) {
 	if len(g.recent) > recentMemory {
 		g.recent = g.recent[len(g.recent)-recentMemory:]
 	}
-}
-
-// CountWithUnit は allowed だけで打てる語のうち unit を含むものの数を返す。
-// 長さの制限は見ない（緊急用のはみ出し出題があるため）。
-func (g *Generator) CountWithUnit(allowed []string, unit string) int {
-	set := newUnitSet(allowed)
-	count := 0
-	for _, w := range g.words {
-		if units, ok := set.segment(w); ok && slices.Contains(units, unit) {
-			count++
-		}
-	}
-	return count
 }
 
 // pick は頻度上位に偏った添字を選ぶ。

@@ -210,10 +210,6 @@ func (m *Model) handleEmissions(ems []naginata.Emission, now time.Time) tea.Cmd 
 
 // newWord は先読みキューの先頭を出題し、キューを補充する。
 func (m *Model) newWord(now time.Time) error {
-	allowed := m.drill.Allowed()
-	// 新出かなの語彙が薄いときにゲートを緩めるため、供給量を教えておく
-	m.drill.SetNewKanaSupply(m.gen.CountWithUnit(allowed, m.drill.Newest()))
-
 	// レベルが変わっていたら、古い条件で選んだ先読みは捨てる
 	if m.queueLevel != m.drill.Level {
 		m.upcoming = nil
@@ -237,7 +233,8 @@ func (m *Model) newWord(now time.Time) error {
 // fillQueue は先読みキューを queueLen 語まで補充する。
 func (m *Model) fillQueue() error {
 	for len(m.upcoming) < queueLen {
-		word, err := m.gen.Word(m.drill.Allowed(), m.focusUnits(), m.drill.Stage().MaxLen)
+		word, err := m.gen.Word(
+			m.drill.Allowed(), m.drill.Newest(), m.weakUnits(3), m.drill.Stage().MaxLen)
 		if err != nil {
 			return err
 		}
@@ -246,14 +243,13 @@ func (m *Model) fillQueue() error {
 	return nil
 }
 
-// focusUnits は優先して出題したいかな（新出と苦手）を返す。
-func (m *Model) focusUnits() []string {
-	allowed := m.drill.Allowed()
-	focus := append([]string{}, allowed[max(len(allowed)-2, 0):]...)
-	for _, w := range m.weakItems(3) {
-		focus = append(focus, w.unit)
+// weakUnits は苦手なかなを上位 n 件返す。
+func (m *Model) weakUnits(n int) []string {
+	var units []string
+	for _, w := range m.weakItems(n) {
+		units = append(units, w.unit)
 	}
-	return focus
+	return units
 }
 
 // resultMessage は単語1つの結果を1行にまとめる。
