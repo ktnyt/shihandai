@@ -10,6 +10,10 @@ const dictPath = fileURLToPath(
 export default defineConfig({
   base: "/shihandai/",
   plugins: [preact()],
+  build: {
+    // 小さな音声ファイルもインライン化せず、必要になってから取りに行く
+    assetsInlineLimit: 0,
+  },
   resolve: {
     // ?raw クエリが付いても解決できるよう正規表現で合わせる
     alias: [{ find: /^@dict\/words\.txt/, replacement: dictPath }],

@@ -137,6 +137,7 @@ export function App() {
     settingsRef.current = next;
     saveSettings(next);
     applySettings(session, sound, next);
+    sound.warm(); // 種類が変わっていたら読み込み直す
     syncUrl();
     bump(0);
   };
@@ -162,6 +163,7 @@ export function App() {
       e.preventDefault();
       if (e.repeat) return;
       if (key === KeySpace && session.state === "ready") {
+        sound.warm(); // 最初の操作でサンプルを読み込む
         session.start();
         return;
       }
@@ -173,12 +175,13 @@ export function App() {
         session.continueLevelUp();
         return;
       }
-      if (session.state === "typing") sound.key();
+      if (session.state === "typing") sound.key(key === KeySpace);
       session.keydown(key);
     };
     const onKeyup = (e: KeyboardEvent) => {
       const key = keyFromCode(e.code);
       if (key === undefined) return;
+      if (session.state === "typing") sound.release(key === KeySpace);
       session.keyup(key);
     };
     // フォーカスが外れると keyup を取り逃がすので一時停止する

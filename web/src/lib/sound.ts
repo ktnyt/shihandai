@@ -1,66 +1,110 @@
-// タイプ音。Web Audio API で合成する (音声ファイルなし、遅延ほぼゼロ)。
+// タイプ音。実録のキースイッチ音 (kbsim, MIT License) を再生する。
+// ミスや昇格などの通知音だけは Web Audio で合成する。
 // AudioContext はユーザー操作 (keydown) の中で初期化する必要がある。
 
 export type SoundType = "mech" | "typewriter" | "pop";
 
 export const SOUND_TYPES: { value: SoundType; label: string }[] = [
-  { value: "mech", label: "メカニカル" },
-  { value: "typewriter", label: "タイプライター" },
-  { value: "pop", label: "ぽこぽこ" },
+  { value: "mech", label: "メカニカル (茶軸)" },
+  { value: "typewriter", label: "タイプライター (座屈バネ)" },
+  { value: "pop", label: "スコスコ (静電容量)" },
 ];
+
+// assets/sounds/<type>/<name>.mp3 を URL として取り込む
+const sampleUrls = import.meta.glob("../assets/sounds/*/*.mp3", {
+  eager: true,
+  query: "?url",
+  import: "default",
+}) as Record<string, string>;
+
+function urlsFor(type: SoundType, prefix: string): string[] {
+  return Object.entries(sampleUrls)
+    .filter(([path]) => path.includes(`/${type}/`) && path.includes(`/${prefix}`))
+    .map(([, url]) => url)
+    .sort();
+}
 
 export class SoundPlayer {
   enabled = true;
   type: SoundType = "mech";
 
   private ctx: AudioContext | null = null;
-  private noiseBuffer: AudioBuffer | null = null;
+  private cache = new Map<string, AudioBuffer>();
+  private loading = new Set<string>();
 
   // AudioContext を用意する。使えない環境では null。
   private ensure(): AudioContext | null {
     if (!this.enabled) return null;
     if (typeof AudioContext === "undefined") return null;
-    if (!this.ctx) {
-      this.ctx = new AudioContext();
-      const len = Math.floor(this.ctx.sampleRate * 0.1);
-      this.noiseBuffer = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
-      const data = this.noiseBuffer.getChannelData(0);
-      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
-    }
+    if (!this.ctx) this.ctx = new AudioContext();
     if (this.ctx.state === "suspended") void this.ctx.resume();
     return this.ctx;
   }
 
-  private envelope(
-    ctx: AudioContext,
-    peak: number,
-    decay: number,
-  ): GainNode {
-    const gain = ctx.createGain();
-    const t = ctx.currentTime;
-    gain.gain.setValueAtTime(peak, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + decay);
-    gain.connect(ctx.destination);
-    return gain;
+  // 現在の種類のサンプルを読み込んでおく。
+  warm(): void {
+    const ctx = this.ensure();
+    if (!ctx) return;
+    for (const url of [
+      ...urlsFor(this.type, "press_"),
+      ...urlsFor(this.type, "release_"),
+    ]) {
+      void this.load(ctx, url);
+    }
   }
 
-  private noise(
-    ctx: AudioContext,
-    filterType: BiquadFilterType,
-    freq: number,
-    peak: number,
-    decay: number,
-  ): void {
-    if (!this.noiseBuffer) return;
+  private async load(ctx: AudioContext, url: string): Promise<AudioBuffer | null> {
+    const cached = this.cache.get(url);
+    if (cached) return cached;
+    if (this.loading.has(url)) return null;
+    this.loading.add(url);
+    try {
+      const res = await fetch(url);
+      const buf = await ctx.decodeAudioData(await res.arrayBuffer());
+      this.cache.set(url, buf);
+      return buf;
+    } catch {
+      return null; // 読み込めなくても練習は続ける
+    } finally {
+      this.loading.delete(url);
+    }
+  }
+
+  private playSample(urls: string[], gain: number): void {
+    const ctx = this.ensure();
+    if (!ctx || urls.length === 0) return;
+    const url = urls[Math.floor(Math.random() * urls.length)];
+    const buf = this.cache.get(url);
+    if (!buf) {
+      // 未ロードなら裏で読み込む。次の打鍵から鳴る
+      void this.load(ctx, url);
+      return;
+    }
     const src = ctx.createBufferSource();
-    src.buffer = this.noiseBuffer;
-    const filter = ctx.createBiquadFilter();
-    filter.type = filterType;
-    filter.frequency.value = freq;
-    src.connect(filter);
-    filter.connect(this.envelope(ctx, peak, decay));
+    src.buffer = buf;
+    // 毎回わずかにピッチを揺らして機械っぽさを消す
+    src.playbackRate.value = 0.96 + Math.random() * 0.08;
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    src.connect(g);
+    g.connect(ctx.destination);
     src.start();
-    src.stop(ctx.currentTime + decay);
+  }
+
+  // 打鍵音。スペース (シフト) はスペースバーの音を使う。
+  key(isSpace = false): void {
+    const urls = isSpace
+      ? urlsFor(this.type, "press_SPACE")
+      : urlsFor(this.type, "press_GENERIC");
+    this.playSample(urls, 1);
+  }
+
+  // 離鍵音。押下より控えめに鳴らす。
+  release(isSpace = false): void {
+    const urls = isSpace
+      ? urlsFor(this.type, "release_SPACE")
+      : urlsFor(this.type, "release_GENERIC");
+    this.playSample(urls, 0.6);
   }
 
   private tone(
@@ -84,26 +128,6 @@ export class SoundPlayer {
     gain.connect(ctx.destination);
     osc.start(t);
     osc.stop(t + decay);
-  }
-
-  // 打鍵音。種類ごとに音色を変え、毎回わずかに揺らして機械っぽさを消す。
-  key(): void {
-    const ctx = this.ensure();
-    if (!ctx) return;
-    const jitter = 0.9 + Math.random() * 0.2;
-    switch (this.type) {
-      case "mech":
-        this.noise(ctx, "bandpass", 1800 * jitter, 0.35, 0.05);
-        this.tone(ctx, "square", 150 * jitter, 70, 0.1, 0.035);
-        break;
-      case "typewriter":
-        this.noise(ctx, "highpass", 2600 * jitter, 0.4, 0.03);
-        this.tone(ctx, "sine", 420 * jitter, 380, 0.08, 0.012);
-        break;
-      case "pop":
-        this.tone(ctx, "sine", 520 * jitter, 240, 0.3, 0.07);
-        break;
-    }
   }
 
   // ミス音。低い濁った音。
