@@ -135,6 +135,12 @@ export function App() {
         return; // パネルの入力を邪魔しない
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "Tab") {
+        // フォーカス移動を止めて、くりかえし練習の切り替えに使う
+        e.preventDefault();
+        if (!e.repeat) session.toggleRepeat();
+        return;
+      }
       if (e.key === "Escape") {
         if (session.state === "paused" || session.state === "ready") {
           // 停止中の Esc は設定を開く
@@ -325,6 +331,7 @@ export function App() {
       <footer>
         <span class="hints faint">
           <span>Esc で一時停止 (停止中はもう一度で設定)</span>
+          <span>Tab で直前の単語をくりかえし練習</span>
           <span>IME はオフ (直接入力) にしてお使いください</span>
         </span>
         <span class="footer-buttons">
@@ -533,11 +540,15 @@ function WordStream({ session }: { session: Session }) {
           </span>
         ))}
       </span>
-      {session.upcoming.map((w, i) => (
-        <span key={`u${i}`} class="word upcoming">
-          {paused ? "●".repeat([...w.join("")].length) : w.join("")}
-        </span>
-      ))}
+      {session.repeat ? (
+        <span class="word upcoming">くりかえし練習中 (Tab で戻る)</span>
+      ) : (
+        session.upcoming.map((w, i) => (
+          <span key={`u${i}`} class="word upcoming">
+            {paused ? "●".repeat([...w.join("")].length) : w.join("")}
+          </span>
+        ))
+      )}
     </div>
   );
 }

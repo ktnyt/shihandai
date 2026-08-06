@@ -82,3 +82,61 @@ describe("upcomingWords", () => {
     expect(session.upcoming.length).toBe(2);
   });
 });
+
+describe("repeat (くりかえし練習)", () => {
+  it("Tab相当の切り替えで直前の単語を何度でも打てる", () => {
+    const { session } = makeSession();
+    session.start();
+
+    // 1語打ち終えると lastWord になる
+    const first = [...session.drill.currentWord()];
+    typeCurrentWord(session);
+    expect(session.drill.successCount().total).toBe(1);
+
+    session.toggleRepeat();
+    expect(session.repeat).toBe(true);
+    expect(session.drill.currentWord()).toEqual(first);
+
+    // 2回打ち直しても成績の窓は増えない
+    typeCurrentWord(session);
+    expect(session.drill.currentWord()).toEqual(first);
+    typeCurrentWord(session);
+    expect(session.drill.successCount().total).toBe(1);
+  });
+
+  it("くりかえし中のミスはかなの成績に残らない", () => {
+    const { session } = makeSession();
+    session.start();
+    typeCurrentWord(session);
+    const before = JSON.stringify(session.drill.stats);
+
+    session.toggleRepeat();
+    const expected = session.drill.expected();
+    session.drill.input(expected === "あ" ? "い" : "あ"); // ミス
+    typeCurrentWord(session);
+    session.toggleRepeat(); // 戻る
+
+    expect(session.repeat).toBe(false);
+    expect(JSON.stringify(session.drill.stats)).toBe(before);
+  });
+
+  it("まだ1語も打っていなければいまの単語をくりかえす", () => {
+    const { session } = makeSession();
+    session.start();
+    const current = [...session.drill.currentWord()];
+    session.toggleRepeat();
+    expect(session.drill.currentWord()).toEqual(current);
+  });
+
+  it("戻ると通常の出題と記録が再開する", () => {
+    const { session } = makeSession();
+    session.start();
+    typeCurrentWord(session);
+    session.toggleRepeat();
+    typeCurrentWord(session);
+    session.toggleRepeat();
+
+    typeCurrentWord(session);
+    expect(session.drill.successCount().total).toBe(2);
+  });
+});

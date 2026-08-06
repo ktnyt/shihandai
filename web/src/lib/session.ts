@@ -34,7 +34,10 @@ export class Session {
   lastResult: WordResult | null = null;
   intervalMs: number; // 設定から変えられるよう公開する
   upcomingWords: number; // 同上
+  repeat = false; // くりかえし練習中 (成績は記録しない)
 
+  private practiceWord: string[] | null = null;
+  private lastWord: string[] | null = null; // 直前に打ち終えた単語
   private queueLevel = 0;
   private waitToken = 0;
 
@@ -89,10 +92,49 @@ export class Session {
     this.engine.reset();
     this.flash = "";
     this.state = "typing";
+    if (this.repeat) {
+      // くりかえし練習はミスを記録せず同じ単語を出し直す
+      this.restartPractice(this.opts.now());
+      this.opts.onChange();
+      return;
+    }
     // 打ちかけを破棄して次の単語へ。ミスした位置は記録に残す
     this.drill.abandonWord();
     this.newWord(this.opts.now());
     this.opts.onChange();
+  }
+
+  // くりかえし練習の切り替え。直前に打ち終えた単語 (なければいまの単語) を
+  // 何度でも打ち直せる。この間の成績は一切記録しない。
+  toggleRepeat(): void {
+    if (this.state !== "typing" && this.state !== "waiting") return;
+    const now = this.opts.now();
+    this.waitToken++; // インターバル待ちがあれば無効にする
+    if (!this.repeat) {
+      const word = this.lastWord ?? this.drill.currentWord();
+      if (word.length === 0) return;
+      // 打ちかけの通常の単語はミスだけ記録して破棄する
+      if (this.state === "typing") this.drill.abandonWord();
+      this.practiceWord = [...word];
+      this.repeat = true;
+      this.state = "typing";
+      this.message = "";
+      this.restartPractice(now);
+    } else {
+      // くりかえし中のミスは記録しない (abandonWord を呼ばない)
+      this.repeat = false;
+      this.practiceWord = null;
+      this.state = "typing";
+      this.message = "";
+      this.newWord(now);
+    }
+    this.opts.onChange();
+  }
+
+  private restartPractice(now: number): void {
+    this.engine.reset();
+    this.drill.startWord(this.practiceWord!, now);
+    this.flash = "";
   }
 
   // レベルアップ画面から練習に戻る。
@@ -128,7 +170,32 @@ export class Session {
           // 修正待ちのまま。フラッシュは出したままにする
           break;
         case "wordDone": {
+          if (this.repeat) {
+            // くりかえし練習は記録せず、同じ単語を出し直す
+            const errors = this.drill.currentErrors();
+            const secs = (this.drill.elapsedMs(now) / 1000).toFixed(1);
+            this.message =
+              errors === 0
+                ? `成功 ${secs}s (くりかえし)`
+                : `ミス ${errors} (くりかえし)`;
+            if (this.intervalMs > 0) {
+              this.state = "waiting";
+              this.engine.reset();
+              const token = ++this.waitToken;
+              this.opts.schedule(() => {
+                if (this.state === "waiting" && this.waitToken === token) {
+                  this.state = "typing";
+                  this.restartPractice(this.opts.now());
+                  this.opts.onChange();
+                }
+              }, this.intervalMs);
+              return;
+            }
+            this.restartPractice(now);
+            return;
+          }
           const out = this.drill.finishWord(now);
+          this.lastWord = [...this.drill.currentWord()];
           this.lastResult = out;
           this.message = resultMessage(out);
           this.opts.onEvent?.(
