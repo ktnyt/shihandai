@@ -217,12 +217,24 @@ footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 1rem;
   font-size: 0.8rem;
+}
+
+/* 案内文が長くなってもボタンを潰さない。文側が折り返す */
+footer > .faint {
+  flex: 1;
+  min-width: 0;
 }
 
 .footer-buttons {
   display: flex;
   gap: 0.5rem;
+  flex: none;
+}
+
+.footer-buttons button {
+  white-space: nowrap;
 }
 
 button.ghost {

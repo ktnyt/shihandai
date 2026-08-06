@@ -1,0 +1,22 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - heading "shihandai — 薙刀式タイピング練習" [level=1] [ref=e5]
+    - generic [ref=e6]: "レベル 1/512 かな 5文字 ながさ 2文字までいまの段階: はじめの5文字"
+    - generic [ref=e7]: "使えるかな: あ い な す る"
+  - generic [ref=e8]:
+    - generic [ref=e9]:
+      - generic [ref=e10]: ●●
+      - generic [ref=e11]: ●●
+      - generic [ref=e12]: ●●
+      - generic [ref=e13]: ●●
+      - generic [ref=e14]: ●●
+      - generic [ref=e15]: ●●
+    - generic [ref=e16]: Space ではじめる (IMEはオフにしておく)
+    - generic [ref=e17]: "--.-sミス 0"
+  - generic [ref=e18]: kpm 0/60 ミス率 0.0%/1.0% 直近 0/50 語
+  - generic [ref=e27]:
+    - generic [ref=e28]: Esc で一時停止 (停止中はもう一度で設定) IME はオフ (直接入力) にしてお使いください
+    - generic [ref=e29]:
+      - button "共有" [ref=e30] [cursor=pointer]
+      - button "設定" [ref=e31] [cursor=pointer]
+      - button "進捗リセット" [ref=e32] [cursor=pointer]

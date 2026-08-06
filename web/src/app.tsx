@@ -242,7 +242,7 @@ export function App() {
         <div class="meta">
           レベル {drill.level}/{maxLevel()}　かな {allowed.length}文字　ながさ{" "}
           {stage.maxLen > 0 ? `${stage.maxLen}文字まで` : "せいげんなし"}
-          　いまの段階: {groupOf(newest)}
+          {`　いまの段階: ${groupOf(newest)}`}
         </div>
         <div class="kana-list">
           使えるかな: {allowed.join(" ")}
@@ -274,7 +274,7 @@ export function App() {
             {session.state === "typing"
               ? `${(drill.elapsedMs(performance.now()) / 1000).toFixed(1)}s`
               : "--.-s"}
-            　ミス {drill.currentErrors()}
+            {`　ミス ${drill.currentErrors()}`}
           </div>
         </section>
       )}
