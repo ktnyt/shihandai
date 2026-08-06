@@ -71,20 +71,8 @@ function createSession(
         onSaved();
       },
       onEvent: (event) => {
-        switch (event) {
-          case "error":
-            sound.error();
-            break;
-          case "wordDone":
-            sound.done();
-            break;
-          case "promoted":
-            sound.levelup();
-            break;
-          case "demoted":
-            sound.error();
-            break;
-        }
+        // 打鍵音だけで練習の流れを邪魔しない。鳴らすのはレベルアップのみ
+        if (event === "promoted") sound.levelup();
       },
     },
   );

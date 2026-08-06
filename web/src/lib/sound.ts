@@ -1,5 +1,5 @@
 // タイプ音。実録のキースイッチ音 (kbsim, MIT License) を再生する。
-// ミスや昇格などの通知音だけは Web Audio で合成する。
+// レベルアップの通知音だけは Web Audio で合成する。
 // AudioContext はユーザー操作 (keydown) の中で初期化する必要がある。
 
 export type SoundType = "mech" | "typewriter" | "pop";
@@ -128,22 +128,6 @@ export class SoundPlayer {
     gain.connect(ctx.destination);
     osc.start(t);
     osc.stop(t + decay);
-  }
-
-  // ミス音。低い濁った音。
-  error(): void {
-    const ctx = this.ensure();
-    if (!ctx) return;
-    this.tone(ctx, "square", 160, 110, 0.12, 0.14);
-    this.tone(ctx, "square", 122, 84, 0.12, 0.14);
-  }
-
-  // 単語を打ち切った音。短い上昇二音。
-  done(): void {
-    const ctx = this.ensure();
-    if (!ctx) return;
-    this.tone(ctx, "sine", 880, 880, 0.1, 0.06);
-    this.tone(ctx, "sine", 1175, 1175, 0.1, 0.09, 0.06);
   }
 
   // レベルアップのアルペジオ。
