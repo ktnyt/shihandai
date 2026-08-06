@@ -117,7 +117,9 @@ export class Drill {
     this.newKanaSupply = n;
   }
 
+  // 最初の5文字の段階では全部が新出なので、ゲートはかけない。
   gateTarget(): number {
+    if (this.allowed().length === unitsFor(1).length) return 0;
     let target = this.cfg.minNewKanaWords;
     if (this.newKanaSupply >= 0) {
       target = Math.min(target, this.newKanaSupply * SUPPLY_FACTOR);

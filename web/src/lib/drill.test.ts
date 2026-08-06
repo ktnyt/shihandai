@@ -110,18 +110,27 @@ describe("Drill", () => {
   });
 
   it("新出かなを含む語が足りないと昇格しない", () => {
-    const d = new Drill(cfgWith({ windowSize: 5, minNewKanaWords: 10 }), 1);
+    // レベル5から新出かな「ん」のゲートがかかる
+    const d = new Drill(cfgWith({ windowSize: 5, minNewKanaWords: 10 }), 5);
     for (let i = 0; i < 30; i++) {
-      // 「あい」は新出かな「る」を含まない
+      // 「あい」は新出かな「ん」を含まない
       expect(typeWord(d, ["あ", "い"], 900).promoted).toBe(false);
     }
     let out;
-    for (let i = 0; i < 10; i++) out = typeWord(d, ["あ", "る"], 900);
+    for (let i = 0; i < 10; i++) out = typeWord(d, ["あ", "ん"], 900);
+    expect(out!.promoted).toBe(true);
+  });
+
+  it("最初の5文字の段階ではゲートがかからない", () => {
+    const d = new Drill(cfgWith({ windowSize: 5, minNewKanaWords: 50 }), 1);
+    expect(d.gateTarget()).toBe(0);
+    let out;
+    for (let i = 0; i < 5; i++) out = typeWord(d, ["あ", "い"], 900);
     expect(out!.promoted).toBe(true);
   });
 
   it("語彙が薄いかなはゲートが緩む", () => {
-    const d = new Drill(cfgWith({ minNewKanaWords: 50 }), 1);
+    const d = new Drill(cfgWith({ minNewKanaWords: 50 }), 5);
     d.setNewKanaSupply(4);
     expect(d.gateTarget()).toBe(20);
   });

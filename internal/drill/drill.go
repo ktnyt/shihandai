@@ -137,7 +137,11 @@ func (d *Drill) SetNewKanaSupply(n int) { d.newKanaSupply = n }
 const supplyFactor = 5
 
 // GateTarget は昇格までに打つべき、新出かなを含む語の数を返す。
+// 最初の5文字の段階では全部が新出なので、ゲートはかけない。
 func (d *Drill) GateTarget() int {
+	if len(d.Allowed()) == len(curriculum.For(1)) {
+		return 0
+	}
 	target := d.Cfg.MinNewKanaWords
 	if d.newKanaSupply >= 0 {
 		target = min(target, d.newKanaSupply*supplyFactor)

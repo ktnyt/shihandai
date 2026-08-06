@@ -146,9 +146,12 @@ func (m Model) content() string {
 		kpm, m.drill.Cfg.TargetKPM,
 		missRate*100, m.drill.Cfg.MaxMissRate*100,
 		total, m.drill.Cfg.WindowSize)
-	fmt.Fprintf(&b, "  %s\n",
-		styleFaint.Render(fmt.Sprintf("「%s」を含む語 %d/%d",
-			newest, m.drill.NewKanaWords(), m.drill.GateTarget())))
+	gateLine := ""
+	if target := m.drill.GateTarget(); target > 0 {
+		gateLine = styleFaint.Render(fmt.Sprintf("「%s」を含む語 %d/%d",
+			newest, m.drill.NewKanaWords(), target))
+	}
+	fmt.Fprintf(&b, "  %s\n", gateLine)
 
 	// 中央寄せしたときに縦位置がぶれないよう、空でも行を確保する
 	flash := ""

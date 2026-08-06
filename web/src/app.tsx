@@ -302,7 +302,9 @@ export function App() {
           {(cfg.maxMissRate * 100).toFixed(1)}%　直近 {total}/{cfg.windowSize} 語
         </div>
         <div class="faint">
-          「{newest}」を含む語 {drill.newKanaWords()}/{drill.gateTarget()}
+          {drill.gateTarget() > 0
+            ? `「${newest}」を含む語 ${drill.newKanaWords()}/${drill.gateTarget()}`
+            : "\u00a0"}
         </div>
       </section>
 

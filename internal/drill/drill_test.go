@@ -183,25 +183,45 @@ func TestNoPromoteWithoutEnoughNewKanaWords(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.WindowSize = 5
 	cfg.MinNewKanaWords = 10
-	d := New(cfg, 1, nil)
+	d := New(cfg, 5, nil) // レベル5から新出かな「ん」のゲートがかかる
 
-	// 「あい」は新出かな「る」を含まないので、いくら成功しても昇格しない
+	// 「あい」は新出かな「ん」を含まないので、いくら成功しても昇格しない
 	for range 30 {
 		if out := typeWord(d, []string{"あ", "い"}, time.Second); out.Promoted {
 			t.Fatal("新出かなの語が足りないのに昇格した")
 		}
 	}
-	if d.Level != 1 {
-		t.Fatalf("Level = %d, want 1", d.Level)
+	if d.Level != 5 {
+		t.Fatalf("Level = %d, want 5", d.Level)
 	}
 
-	// 「る」を含む語を10語打てば昇格できる
+	// 「ん」を含む語を10語打てば昇格できる
 	var out WordResult
 	for range cfg.MinNewKanaWords {
-		out = typeWord(d, []string{"あ", "る"}, 900*time.Millisecond)
+		out = typeWord(d, []string{"あ", "ん"}, 900*time.Millisecond)
 	}
 	if !out.Promoted {
 		t.Fatalf("ゲートを満たしたのに昇格しない: %+v (gate=%d)", out, d.NewKanaWords())
+	}
+}
+
+func TestNoGateOnInitialKana(t *testing.T) {
+	// 最初の5文字の段階 (レベル1〜4) は全部が新出なのでゲートなし
+	cfg := DefaultConfig()
+	cfg.WindowSize = 5
+	cfg.MinNewKanaWords = 50
+	d := New(cfg, 1, nil)
+	if d.GateTarget() != 0 {
+		t.Fatalf("GateTarget = %d, want 0", d.GateTarget())
+	}
+
+	// 「る」を含まない語だけでも昇格できる
+	var out WordResult
+	for range cfg.WindowSize {
+		out = typeWord(d, []string{"あ", "い"}, 900*time.Millisecond)
+	}
+	if !out.Promoted {
+		t.Fatalf("最初の段階なのにゲートで止まった: %+v", out)
 	}
 }
 
