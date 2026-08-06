@@ -13,6 +13,8 @@ export type SessionState =
   | "paused"
   | "leveledUp";
 
+export type SessionEvent = "error" | "wordDone" | "promoted" | "demoted";
+
 export interface SessionOptions {
   intervalMs: number; // 単語と単語の間の入力を受け付けない時間
   upcomingWords: number; // 先に見える単語の数
@@ -20,6 +22,7 @@ export interface SessionOptions {
   schedule: (fn: () => void, ms: number) => void;
   onChange: () => void;
   onSave: () => void;
+  onEvent?: (event: SessionEvent) => void; // 効果音などの演出用
 }
 
 export class Session {
@@ -111,6 +114,7 @@ export class Session {
           this.flash = this.drill.needsBackspace()
             ? `ミス: ${printable(em.text)} (BSで消してから打ち直す)`
             : `ミス: ${printable(em.text)}`;
+          this.opts.onEvent?.("error");
           break;
         case "corrected":
           this.flash = "";
@@ -122,6 +126,9 @@ export class Session {
           const out = this.drill.finishWord(now);
           this.lastResult = out;
           this.message = resultMessage(out);
+          this.opts.onEvent?.(
+            out.promoted ? "promoted" : out.demoted ? "demoted" : "wordDone",
+          );
           this.opts.onSave();
           if (out.promoted) {
             this.state = "leveledUp";

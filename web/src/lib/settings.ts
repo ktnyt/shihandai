@@ -1,6 +1,9 @@
 // 練習の調整項目。localStorage に保存し、URLクエリで一時的に上書きできる。
 
-export interface Settings {
+import type { SoundType } from "./sound";
+
+// 練習モードで切り替わる条件の部分。
+export interface PresetSettings {
   targetKPM: number; // 昇格に必要な打鍵速度
   maxMissRate: number; // 昇格できるミス率の上限 (割合)
   upcomingWords: number; // 先に見える単語の数
@@ -10,9 +13,14 @@ export interface Settings {
   requireBackspace: boolean; // ミス時にバックスペース修正が必要か
 }
 
+export interface Settings extends PresetSettings {
+  soundEnabled: boolean; // タイプ音を鳴らすか
+  soundType: SoundType; // タイプ音の種類
+}
+
 export interface Preset {
   name: string;
-  settings: Settings;
+  settings: PresetSettings;
 }
 
 // 練習モード。値をいじるとカスタム扱いになる。
@@ -67,9 +75,14 @@ export const PRESETS: Preset[] = [
   },
 ];
 
-export const DEFAULT_SETTINGS: Settings = { ...PRESETS[0].settings };
+export const DEFAULT_SETTINGS: Settings = {
+  ...PRESETS[0].settings,
+  soundEnabled: true,
+  soundType: "mech",
+};
 
-// 設定が一致するプリセット名を返す。なければ null (カスタム)。
+// 練習条件が一致するプリセット名を返す。なければ null (カスタム)。
+// タイプ音はモードと無関係なので比較しない。
 export function matchPreset(s: Settings): string | null {
   for (const p of PRESETS) {
     if (
@@ -108,6 +121,16 @@ export function sanitize(partial: Partial<Settings>): Settings {
       typeof partial.requireBackspace === "boolean"
         ? partial.requireBackspace
         : d.requireBackspace,
+    soundEnabled:
+      typeof partial.soundEnabled === "boolean"
+        ? partial.soundEnabled
+        : d.soundEnabled,
+    soundType:
+      partial.soundType === "mech" ||
+      partial.soundType === "typewriter" ||
+      partial.soundType === "pop"
+        ? partial.soundType
+        : d.soundType,
   };
 }
 

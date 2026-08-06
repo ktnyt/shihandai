@@ -9,19 +9,23 @@ import { chordLabel, keyFromCode, KeySpace } from "./lib/keys";
 import { groupOf, maxLevel } from "./lib/curriculum";
 import * as store from "./lib/store";
 import { encodeShare } from "./lib/share";
+import { SoundPlayer, SOUND_TYPES } from "./lib/sound";
 import {
   loadSettings,
   matchPreset,
   PRESETS,
   sanitize,
   saveSettings,
+  type PresetSettings,
   type Settings,
 } from "./lib/settings";
 
 const KPM_METER_MAX = 180;
 
 // 設定を練習中のセッションに反映する。
-function applySettings(session: Session, s: Settings): void {
+function applySettings(session: Session, sound: SoundPlayer, s: Settings): void {
+  sound.enabled = s.soundEnabled;
+  sound.type = s.soundType;
   const cfg = session.drill.cfg;
   cfg.targetKPM = s.targetKPM;
   cfg.maxMissRate = s.maxMissRate;
@@ -34,9 +38,12 @@ function applySettings(session: Session, s: Settings): void {
 
 function createSession(
   settings: Settings,
+  sound: SoundPlayer,
   onChange: () => void,
   onSaved: () => void,
 ): Session {
+  sound.enabled = settings.soundEnabled;
+  sound.type = settings.soundType;
   const cfg = { ...DEFAULT_DRILL_CONFIG };
   cfg.targetKPM = settings.targetKPM;
   cfg.maxMissRate = settings.maxMissRate;
@@ -63,6 +70,22 @@ function createSession(
         store.save({ level: drill.level, stats: drill.stats, records, newKanaWords });
         onSaved();
       },
+      onEvent: (event) => {
+        switch (event) {
+          case "error":
+            sound.error();
+            break;
+          case "wordDone":
+            sound.done();
+            break;
+          case "promoted":
+            sound.levelup();
+            break;
+          case "demoted":
+            sound.error();
+            break;
+        }
+      },
     },
   );
   return session;
@@ -73,8 +96,10 @@ export function App() {
   const [settings, setSettings] = useState(() => loadSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const syncUrlRef = useRef<() => void>(() => {});
+  const sound = useMemo(() => new SoundPlayer(), []);
   const session = useMemo(
-    () => createSession(loadSettings(), () => bump(0), () => syncUrlRef.current()),
+    () =>
+      createSession(loadSettings(), sound, () => bump(0), () => syncUrlRef.current()),
     [],
   );
   const drill = session.drill;
@@ -111,7 +136,7 @@ export function App() {
     setSettings(next);
     settingsRef.current = next;
     saveSettings(next);
-    applySettings(session, next);
+    applySettings(session, sound, next);
     syncUrl();
     bump(0);
   };
@@ -148,6 +173,7 @@ export function App() {
         session.continueLevelUp();
         return;
       }
+      if (session.state === "typing") sound.key();
       session.keydown(key);
     };
     const onKeyup = (e: KeyboardEvent) => {
@@ -324,7 +350,7 @@ export function App() {
 }
 
 interface FieldSpec {
-  key: Exclude<keyof Settings, "requireBackspace">;
+  key: Exclude<keyof PresetSettings, "requireBackspace">;
   label: string;
   note: string;
   min: number;
@@ -372,7 +398,13 @@ function SettingsPanel({
             <button
               key={p.name}
               class={`preset ${activePreset === p.name ? "active" : ""}`}
-              onClick={() => onChange({ ...p.settings })}
+              onClick={() =>
+                onChange({
+                  ...p.settings,
+                  soundEnabled: settings.soundEnabled,
+                  soundType: settings.soundType,
+                })
+              }
             >
               {p.name}
             </button>
@@ -416,6 +448,49 @@ function SettingsPanel({
               )
             }
           />
+        </label>
+        <label class="field">
+          <span class="field-label">
+            タイプ音
+            <span class="field-note">打鍵に合わせて音を鳴らす</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={settings.soundEnabled}
+            onChange={(e) =>
+              onChange(
+                sanitize({
+                  ...settings,
+                  soundEnabled: (e.target as HTMLInputElement).checked,
+                }),
+              )
+            }
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">
+            音の種類
+            <span class="field-note">打てばそのまま試し聴きできる</span>
+          </span>
+          <select
+            value={settings.soundType}
+            disabled={!settings.soundEnabled}
+            onChange={(e) =>
+              onChange(
+                sanitize({
+                  ...settings,
+                  soundType: (e.target as HTMLSelectElement)
+                    .value as Settings["soundType"],
+                }),
+              )
+            }
+          >
+            {SOUND_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
         </label>
         <div class="panel-actions">
           <button class="primary" onClick={onClose}>

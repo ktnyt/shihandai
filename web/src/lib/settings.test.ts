@@ -31,9 +31,23 @@ describe("presets", () => {
 
   it("プリセットは sanitize で変化しない (共有時の互換性)", () => {
     for (const p of PRESETS) {
-      expect(sanitize({ ...p.settings }), p.name).toEqual(p.settings);
-      expect(matchPreset(p.settings)).toBe(p.name);
+      const full = {
+        ...p.settings,
+        soundEnabled: DEFAULT_SETTINGS.soundEnabled,
+        soundType: DEFAULT_SETTINGS.soundType,
+      };
+      expect(sanitize({ ...p.settings }), p.name).toEqual(full);
+      expect(matchPreset(full)).toBe(p.name);
     }
+  });
+
+  it("タイプ音の設定はプリセット判定に影響しない", () => {
+    expect(matchPreset({ ...DEFAULT_SETTINGS, soundEnabled: false })).toBe(
+      "初心者",
+    );
+    expect(matchPreset({ ...DEFAULT_SETTINGS, soundType: "pop" })).toBe(
+      "初心者",
+    );
   });
 
   it("値をいじるとカスタム扱いになる", () => {
