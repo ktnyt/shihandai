@@ -268,8 +268,9 @@ export class Drill {
       weakUnit: "",
     };
 
-    // 一瞬で打ち終えた語で速度が発散しないよう下限を置く
-    const typingMs = Math.max(out.durationMs, 10);
+    // 一瞬で打ち終えた語で速度が発散しないよう下限を置く。
+    // ms は整数に丸める (保存と共有URLを短くするため)
+    const typingMs = Math.max(Math.round(out.durationMs), 10);
     this.records.push({
       success: out.success,
       units: this.word.length,

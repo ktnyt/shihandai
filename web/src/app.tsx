@@ -8,6 +8,7 @@ import { chordFor } from "./lib/table";
 import { chordLabel, keyFromCode, KeySpace } from "./lib/keys";
 import { groupOf, maxLevel } from "./lib/curriculum";
 import * as store from "./lib/store";
+import { encodeShare } from "./lib/share";
 import {
   loadSettings,
   matchPreset,
@@ -158,6 +159,25 @@ export function App() {
     }
   };
 
+  const onShare = async () => {
+    session.pause();
+    const { records, newKanaWords } = drill.progress();
+    const encoded = await encodeShare(settings, {
+      level: drill.level,
+      stats: drill.stats,
+      records,
+      newKanaWords,
+    });
+    const url = `${location.origin}${import.meta.env.BASE_URL}#p=${encoded}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      session.message = "共有リンクをコピーした (設定と進捗が入っている)";
+    } catch {
+      prompt("このURLをコピーしてください", url);
+    }
+    bump(0);
+  };
+
   return (
     <main class="app">
       <header>
@@ -241,6 +261,9 @@ export function App() {
           Esc で一時停止・IMEはオフ (直接入力) にして使う
         </span>
         <span class="footer-buttons">
+          <button class="ghost" onClick={onShare}>
+            共有
+          </button>
           <button class="ghost" onClick={openSettings}>
             設定
           </button>
