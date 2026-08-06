@@ -73,9 +73,10 @@ func (m Model) content() string {
 					styleCurrent.Render(newest),
 					styleHint.Render("["+chord.Label()+"]"))
 			}
+		} else if maxLen := m.drill.Stage().MaxLen; maxLen > 0 {
+			fmt.Fprintf(&b, "  ながさ%d文字までの語がでるようになった\n\n", maxLen)
 		} else {
-			fmt.Fprintf(&b, "  ながさ %s の語がでるようになった\n\n",
-				maxLenLabel(m.drill.Stage().MaxLen))
+			b.WriteString("  ながさのせいげんがなくなった\n\n")
 		}
 		b.WriteString("  " + styleFaint.Render("Space ではじめる、Esc で終了") + "\n")
 		return b.String()
@@ -141,7 +142,7 @@ func (m Model) content() string {
 	b.WriteString("  " + m.kpmMeter() + "\n")
 	kpm := m.drill.WindowKPM()
 	missRate := m.drill.MissRate()
-	fmt.Fprintf(&b, "  kpm %.0f/%.0f  ミス率 %.1f%%/%.1f%%  直近 %d/%d 語 (両方みたすとレベルアップ)\n",
+	fmt.Fprintf(&b, "  kpm %.0f/%.0f  ミス率 %.1f%%/%.1f%%  直近 %d/%d 語 (この2つと下の語数をみたすとレベルアップ)\n",
 		kpm, m.drill.Cfg.TargetKPM,
 		missRate*100, m.drill.Cfg.MaxMissRate*100,
 		total, m.drill.Cfg.WindowSize)

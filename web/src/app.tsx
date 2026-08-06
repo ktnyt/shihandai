@@ -222,7 +222,7 @@ export function App() {
         <div class="meta">
           レベル {drill.level}/{maxLevel()}　かな {allowed.length}文字　ながさ{" "}
           {stage.maxLen > 0 ? `${stage.maxLen}文字まで` : "せいげんなし"}
-          {groupOf(newest)}
+          　いまの段階: {groupOf(newest)}
         </div>
         <div class="kana-list">
           使えるかな: {allowed.join(" ")}
@@ -239,8 +239,9 @@ export function App() {
             </div>
           ) : (
             <div class="levelup-body">
-              ながさ {stage.maxLen > 0 ? `${stage.maxLen}文字まで` : "せいげんなし"}{" "}
-              の語がでるようになった
+              {stage.maxLen > 0
+                ? `ながさ${stage.maxLen}文字までの語がでるようになった`
+                : "ながさのせいげんがなくなった"}
             </div>
           )}
           <div class="faint">Space ではじめる</div>
@@ -293,7 +294,7 @@ export function App() {
 
       <footer>
         <span class="faint">
-          Esc で一時停止・IMEはオフ (直接入力) にして使う
+          Esc で一時停止 (停止中はもう一度で設定)　IME はオフ (直接入力) にして使う
         </span>
         <span class="footer-buttons">
           <button class="ghost" onClick={onShare}>
@@ -339,8 +340,8 @@ const FIELDS: FieldSpec[] = [
     toView: (v) => Math.round(v * 1000) / 10, fromView: (v) => v / 100,
   },
   { key: "upcomingWords", label: "先に見える単語数", note: "いま打つ単語の右に見える先読みの数", min: 0, max: 10, step: 1 },
-  { key: "windowSize", label: "判定に使う単語数", note: "この窓の kpm とミス率で昇格を判定", min: 10, max: 500, step: 10 },
-  { key: "minNewKanaWords", label: "新出かなの語数", note: "昇格までに打つ、新しいかなを含む語の回数", min: 0, max: 300, step: 5 },
+  { key: "windowSize", label: "判定に使う直近の単語数", note: "この語数分の kpm とミス率で昇格を判定", min: 10, max: 500, step: 10 },
+  { key: "minNewKanaWords", label: "新出かなの語数", note: "昇格までに打つ、新出かなを含む語の最低数", min: 0, max: 300, step: 5 },
   { key: "intervalMs", label: "単語間インターバル (ms)", note: "次の単語が出るまで入力を受け付けない時間", min: 0, max: 3000, step: 50 },
 ];
 
@@ -419,7 +420,7 @@ function SettingsPanel({
           </button>
         </div>
         <p class="faint small">
-          変更はすぐ保存され、この端末の次回起動にも引き継がれます。
+          変更はすぐ保存され、この端末の次回起動にも引き継がれる。
         </p>
       </div>
     </div>

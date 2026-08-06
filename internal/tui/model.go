@@ -262,7 +262,7 @@ func resultMessage(out drill.WordResult) string {
 	case out.Demoted:
 		return fmt.Sprintf("「%s」の正答率が下がったのでレベルダウン", out.WeakUnit)
 	case out.Promoted:
-		return "速度とミス率が基準をみたした! レベルアップ"
+		return "昇格の基準をみたした! レベルアップ"
 	case out.Success:
 		return fmt.Sprintf("成功 %.1fs", out.Duration.Seconds())
 	default:

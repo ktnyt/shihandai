@@ -204,7 +204,7 @@ function resultMessage(out: WordResult): string {
     return `「${out.weakUnit}」の正答率が下がったのでレベルダウン`;
   }
   if (out.promoted) {
-    return "速度とミス率が基準をみたした! レベルアップ";
+    return "昇格の基準をみたした! レベルアップ";
   }
   if (out.success) {
     return `成功 ${(out.durationMs / 1000).toFixed(1)}s`;
