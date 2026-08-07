@@ -85,6 +85,11 @@ export function unitsFor(level: number): string[] {
   return stageFor(level).units;
 }
 
+// 配列にあるかなを拡張順にすべて返す。
+export function allUnits(): string[] {
+  return flattened;
+}
+
 export function groupOf(unit: string): string {
   for (const g of GROUPS) {
     if (g.units.includes(unit)) return g.name;

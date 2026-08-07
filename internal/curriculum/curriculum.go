@@ -82,6 +82,9 @@ var flattened = func() []string {
 	return all
 }()
 
+// All は配列にあるかなを拡張順にすべて返す。
+func All() []string { return flattened[:len(flattened):len(flattened)] }
+
 // initialCount は最初のレベルで解放されているかなの数。
 const initialCount = 5
 

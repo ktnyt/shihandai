@@ -140,24 +140,108 @@ func TestWordRespectsMaxLen(t *testing.T) {
 	}
 }
 
-func TestWordNewestFallbackBeyondMaxLen(t *testing.T) {
-	// 「ぢょ」を含む語は辞書では6文字が最短なので、新出かなを優先するときは
-	// 長さ制限を超えてでも出す
+// gramSet は allowed で打てる、辞書に現れる長さ n の並びを集める。
+func gramSet(g *Generator, allowed []string, n int) map[string]bool {
+	set := make(map[string]bool, len(allowed))
+	for _, u := range allowed {
+		set[u] = true
+	}
+	out := map[string]bool{}
+	for _, gram := range g.gramsOf(n) {
+		if typable(gram, set) {
+			out[strings.Join(gram, "")] = true
+		}
+	}
+	return out
+}
+
+func TestWordGramsComeFromDict(t *testing.T) {
+	// 3文字以上の課題は、単語でなくても辞書に現れる並びであること
+	g := newGen(3)
+	allowed := curriculum.For(60)
+	grams := map[int]map[string]bool{}
+	for n := 3; n <= 5; n++ {
+		grams[n] = gramSet(g, allowed, n)
+	}
+
+	for range 300 {
+		word, err := g.Word(allowed, "", nil, 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(word) < 3 {
+			continue
+		}
+		if !grams[len(word)][strings.Join(word, "")] {
+			t.Fatalf("辞書に現れない並びが出た: %v", word)
+		}
+	}
+}
+
+func TestWordGramsBeyondWords(t *testing.T) {
+	// 単語として成り立たない断片も課題になる
+	g := newGen(3)
+	allowed := curriculum.For(60)
+	set := newUnitSet(allowed)
+	words := map[string]bool{}
+	for _, w := range g.words {
+		if _, ok := set.segment(w); ok {
+			words[w] = true
+		}
+	}
+
+	fragments := 0
+	for range 300 {
+		word, err := g.Word(allowed, "", nil, 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(word) >= 3 && !words[strings.Join(word, "")] {
+			fragments++
+		}
+	}
+	if fragments == 0 {
+		t.Error("300回すべてが辞書にある単語だった")
+	}
+}
+
+func TestWordPrefersLongerGrams(t *testing.T) {
+	// レベル内では長い断片ほど当たりやすい
+	g := newGen(7)
+	allowed := curriculum.For(60)
+	hist := map[int]int{}
+	for range 600 {
+		word, err := g.Word(allowed, "", nil, 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hist[len(word)]++
+	}
+	for n := 3; n <= 5; n++ {
+		if hist[n] <= hist[n-1] {
+			t.Errorf("%d文字 %d 回が %d文字 %d 回を上回っていない: %v",
+				n, hist[n], n-1, hist[n-1], hist)
+		}
+	}
+}
+
+func TestWordGramsKeepNewest(t *testing.T) {
+	// 新出かなの優先は断片から選ぶときも効く
 	cfg := DefaultConfig()
 	cfg.NewestRatio = 1
 	cfg.WeakRatio = 0
 	g := NewGenerator(cfg, rand.New(rand.NewSource(1)))
-	allowed := curriculum.For(curriculum.MaxLevel())
+	allowed := curriculum.For(60)
+	newest := allowed[len(allowed)-1]
 
-	word, err := g.Word(allowed, "ぢょ", nil, 3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(word, "ぢょ") {
-		t.Fatalf("新出かなを含まない語が出た: %v", word)
-	}
-	if len(word) <= 3 {
-		t.Fatalf("長さ制限を超える語が出るはずが %v だった", word)
+	for range 200 {
+		word, err := g.Word(allowed, newest, nil, 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(word, newest) {
+			t.Fatalf("新出かな %q を含まない課題が出た: %v", newest, word)
+		}
 	}
 }
 

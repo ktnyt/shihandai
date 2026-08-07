@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ktnyt/shihandai/internal/curriculum"
 	"github.com/ktnyt/shihandai/internal/dict"
 )
 
@@ -32,12 +33,19 @@ const recentMemory = 20
 // 意味のない組み合わせも出して、かなの運指そのものを練習する。
 const randomPairLen = 2
 
-// Generator は辞書から練習する単語を選ぶ。
+// Generator は辞書から練習する課題を選ぶ。
 type Generator struct {
-	Cfg    Config
-	Rand   *rand.Rand
-	words  []string // 頻度順
-	recent []string // 直近に出した語。しばらく出にくくする
+	Cfg   Config
+	Rand  *rand.Rand
+	words []string // 頻度順
+	all   []string // 配列にあるかな。断片の切れ目を決めるのに使う
+
+	units [][]string         // 語をかな単位に分けたもの
+	grams map[int][][]string // 長さごとの断片。辞書全体から集める
+	key   string             // avail を作ったときの条件
+	avail map[int][][]string // いま使えるかなで打てる断片
+
+	recent []string // 直近に出した課題。しばらく出にくくする
 }
 
 // NewGenerator は埋め込み辞書を使う Generator を作る。
@@ -54,56 +62,183 @@ func NewGenerator(cfg Config, rnd *rand.Rand) *Generator {
 	if cfg.WeakRatio < 0 || cfg.NewestRatio+cfg.WeakRatio > 1 {
 		cfg.WeakRatio = DefaultConfig().WeakRatio
 	}
-	return &Generator{Cfg: cfg, Rand: rnd, words: dict.Words()}
+	return &Generator{
+		Cfg:   cfg,
+		Rand:  rnd,
+		words: dict.Words(),
+		all:   curriculum.All(),
+		grams: map[int][][]string{},
+	}
 }
 
-// Word は allowed のかなだけで打てる単語を1つ選ぶ。
-// maxLen は単語の最大文字数（単位数）で、0 なら無制限。
-// newest は新しく覚えているかな、weak は苦手なかな。新出かなを含む語を
-// NewestRatio、苦手かなを含む語を WeakRatio の割合で優先して出す。
-// ただし2文字の語だけは辞書を引かず、かなをランダムに組み合わせる。
+// Word は allowed のかなだけで打てる課題を1つ選ぶ。
+// maxLen は課題の長さの上限（拗音は2文字で1単位）で、0 なら辞書の単語を
+// そのまま出す。newest は新出かな、weak は苦手なかな。新出かなを含む課題を
+// NewestRatio、苦手かなを含む課題を WeakRatio の割合で優先して出す。
 func (g *Generator) Word(allowed []string, newest string, weak []string, maxLen int) ([]string, error) {
 	if len(allowed) == 0 {
 		return nil, fmt.Errorf("使えるかながない")
 	}
-	// 2文字までの段階は、辞書を引かずに毎回かなを組み合わせる
-	if maxLen == randomPairLen {
-		return g.randomPair(allowed, g.forcedUnit(allowed, newest, weak)), nil
+	if maxLen > 0 {
+		return g.fromGrams(allowed, newest, weak, maxLen), nil
+	}
+	return g.fromWords(allowed, newest, weak)
+}
+
+// fromGrams は辞書に現れるかなの並びから課題を選ぶ。単語として成り立たない
+// 断片でもよい。2文字はかなを組み合わせて作り、3文字以上は辞書の断片から
+// 一様に選ぶ。長さそのものを重みにして、長い断片ほど当たりやすくする。
+func (g *Generator) fromGrams(allowed []string, newest string, weak []string, maxLen int) []string {
+	forced := g.forcedUnit(allowed, newest, weak)
+	pools := g.available(allowed, maxLen)
+	if forced != "" {
+		pools = withUnit(pools, forced)
 	}
 
+	// 2文字はかなを組み合わせて作るので、絞り込んでも必ず出せる
+	length := g.pickLength(pools, maxLen)
+	if length == randomPairLen {
+		return g.randomPair(allowed, forced)
+	}
+
+	pool := pools[length]
+	limit := min(recentMemory, len(pool)/2)
+	var w []string
+	for range 8 {
+		w = pool[g.Rand.Intn(len(pool))]
+		if !g.recentlyShown(w, limit) {
+			break
+		}
+	}
+	g.remember(w)
+	return w
+}
+
+// pickLength は出す課題の長さを選ぶ。断片がない長さは飛ばす。
+func (g *Generator) pickLength(pools map[int][][]string, maxLen int) int {
+	total := 0
+	for n := randomPairLen; n <= maxLen; n++ {
+		if n == randomPairLen || len(pools[n]) > 0 {
+			total += n
+		}
+	}
+	r := g.Rand.Intn(total)
+	for n := randomPairLen; n <= maxLen; n++ {
+		if n != randomPairLen && len(pools[n]) == 0 {
+			continue
+		}
+		if r < n {
+			return n
+		}
+		r -= n
+	}
+	return randomPairLen
+}
+
+// available はいま使えるかなだけで打てる断片を長さごとに集める。
+// 同じレベルのあいだは結果が変わらないので、条件が変わったときだけ作り直す。
+func (g *Generator) available(allowed []string, maxLen int) map[int][][]string {
+	key := fmt.Sprintf("%d\x00%s", maxLen, strings.Join(allowed, "\x00"))
+	if g.key == key {
+		return g.avail
+	}
+	set := make(map[string]bool, len(allowed))
+	for _, u := range allowed {
+		set[u] = true
+	}
+	avail := make(map[int][][]string, maxLen)
+	for n := randomPairLen + 1; n <= maxLen; n++ {
+		for _, gram := range g.gramsOf(n) {
+			if typable(gram, set) {
+				avail[n] = append(avail[n], gram)
+			}
+		}
+	}
+	g.key, g.avail = key, avail
+	return avail
+}
+
+// gramsOf は辞書に現れる長さ n のかなの並びを重複なく集める。
+func (g *Generator) gramsOf(n int) [][]string {
+	if got, ok := g.grams[n]; ok {
+		return got
+	}
+	seen := make(map[string]bool)
+	var out [][]string
+	for _, units := range g.wordUnits() {
+		for i := 0; i+n <= len(units); i++ {
+			gram := units[i : i+n : i+n]
+			key := strings.Join(gram, "\x00")
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, gram)
+		}
+	}
+	g.grams[n] = out
+	return out
+}
+
+// wordUnits は辞書の語をかな単位に分けて返す。拗音の切れ目は配列のかな
+// 全体で決めるので、使えるかなが増えても分けかたは変わらない。
+func (g *Generator) wordUnits() [][]string {
+	if g.units != nil {
+		return g.units
+	}
+	set := newUnitSet(g.all)
+	units := make([][]string, 0, len(g.words))
+	for _, w := range g.words {
+		if u, ok := set.segment(w); ok {
+			units = append(units, u)
+		}
+	}
+	g.units = units
+	return units
+}
+
+// withUnit は指定したかなを含む断片だけに絞る。
+func withUnit(pools map[int][][]string, unit string) map[int][][]string {
+	out := make(map[int][][]string, len(pools))
+	for n, pool := range pools {
+		for _, gram := range pool {
+			if slices.Contains(gram, unit) {
+				out[n] = append(out[n], gram)
+			}
+		}
+	}
+	return out
+}
+
+func typable(gram []string, set map[string]bool) bool {
+	for _, u := range gram {
+		if !set[u] {
+			return false
+		}
+	}
+	return true
+}
+
+// fromWords は辞書の単語をそのまま選ぶ。長さの制限がない最終段階で使う。
+// ただし選ばれたのが2文字なら、辞書にない組み合わせにも広げる。
+func (g *Generator) fromWords(allowed []string, newest string, weak []string) ([]string, error) {
 	set := newUnitSet(allowed)
 
 	// 頻度順を保ったまま、打てる語だけに絞る
 	var candidates [][]string
 	var newestPool [][]string
-	var newestLong [][]string // 長さ超過だが新出かなを含む語（緊急用）
 	var weakPool [][]string
 	for _, w := range g.words {
 		units, ok := set.segment(w)
 		if !ok {
 			continue
 		}
-		hasNewest := newest != "" && slices.Contains(units, newest)
-		if maxLen > 0 && len(units) > maxLen {
-			if hasNewest {
-				newestLong = append(newestLong, units)
-			}
-			continue
-		}
 		candidates = append(candidates, units)
-		if hasNewest {
+		if newest != "" && slices.Contains(units, newest) {
 			newestPool = append(newestPool, units)
 		} else if containsAny(units, weak) {
 			weakPool = append(weakPool, units)
 		}
-	}
-	// 長さの範囲内に新出かなを含む語がなければ、範囲を超えても出す。
-	// 新出かなの練習が長さ制限で詰まないようにするため
-	if len(newestPool) == 0 {
-		newestPool = newestLong
-	}
-	if len(candidates) == 0 {
-		candidates = newestPool
 	}
 	if len(candidates) == 0 {
 		return nil, fmt.Errorf("使えるかな %v で打てる語が辞書にない", allowed)

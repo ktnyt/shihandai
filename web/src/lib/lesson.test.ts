@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Generator, segment } from "./lesson";
-import { unitsFor, maxLevel } from "./curriculum";
+import { unitsFor, maxLevel, allUnits } from "./curriculum";
 import { words } from "./dict";
 
 // テスト用の決定的な乱数。
@@ -69,22 +69,79 @@ describe("Generator", () => {
     }
   });
 
-  it("新出かなを含む語がないときは長さを超えて出す", () => {
-    // 「ぢょ」を含む語は辞書では6文字が最短
-    const g = new Generator(
-      words(),
-      { newestRatio: 1, weakRatio: 0, skew: 2 },
-      seededRandom(1),
-    );
-    const allowed = unitsFor(maxLevel());
-    const word = g.word(allowed, "ぢょ", [], 3);
-    expect(word).toContain("ぢょ");
-    expect(word.length).toBeGreaterThan(3);
-  });
-
   it("打てる語がなければ例外", () => {
     const g = new Generator(words(), undefined, seededRandom(1));
     expect(() => g.word(["っ"], null, [], 0)).toThrow();
+  });
+
+  describe("辞書の断片", () => {
+    // allowed で打てる、辞書に現れる長さ n の並びを集める。
+    function gramSet(allowed: string[], n: number): Set<string> {
+      const set = new Set(allowed);
+      const out = new Set<string>();
+      for (const w of words()) {
+        const units = segment(w, allUnits());
+        if (units === null) continue;
+        for (let i = 0; i + n <= units.length; i++) {
+          const gram = units.slice(i, i + n);
+          if (gram.every((u) => set.has(u))) out.add(gram.join(""));
+        }
+      }
+      return out;
+    }
+
+    it("3文字以上は辞書に現れる並びから出す", () => {
+      const g = new Generator(words(), undefined, seededRandom(3));
+      const allowed = unitsFor(60);
+      const grams = new Map(
+        [3, 4, 5].map((n) => [n, gramSet(allowed, n)] as const),
+      );
+      for (let i = 0; i < 300; i++) {
+        const word = g.word(allowed, null, [], 5);
+        if (word.length < 3) continue;
+        expect(grams.get(word.length)!.has(word.join(""))).toBe(true);
+      }
+    });
+
+    it("単語として成り立たない断片も出る", () => {
+      const g = new Generator(words(), undefined, seededRandom(3));
+      const allowed = unitsFor(60);
+      const inDict = new Set(
+        words().filter((w) => segment(w, allowed) !== null),
+      );
+      let fragments = 0;
+      for (let i = 0; i < 300; i++) {
+        const word = g.word(allowed, null, [], 5);
+        if (word.length >= 3 && !inDict.has(word.join(""))) fragments++;
+      }
+      expect(fragments).toBeGreaterThan(0);
+    });
+
+    it("長い断片ほど当たりやすい", () => {
+      const g = new Generator(words(), undefined, seededRandom(7));
+      const allowed = unitsFor(60);
+      const hist: Record<number, number> = {};
+      for (let i = 0; i < 600; i++) {
+        const n = g.word(allowed, null, [], 5).length;
+        hist[n] = (hist[n] ?? 0) + 1;
+      }
+      for (let n = 3; n <= 5; n++) {
+        expect(hist[n]).toBeGreaterThan(hist[n - 1]);
+      }
+    });
+
+    it("新出かなの優先は断片から選ぶときも効く", () => {
+      const g = new Generator(
+        words(),
+        { newestRatio: 1, weakRatio: 0, skew: 2 },
+        seededRandom(1),
+      );
+      const allowed = unitsFor(60);
+      const newest = allowed[allowed.length - 1];
+      for (let i = 0; i < 200; i++) {
+        expect(g.word(allowed, newest, [], 5)).toContain(newest);
+      }
+    });
   });
 
   describe("2文字の出題", () => {
