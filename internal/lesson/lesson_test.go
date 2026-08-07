@@ -198,6 +198,66 @@ func TestWordRandomPairIgnoresDict(t *testing.T) {
 	}
 }
 
+// dictPairs は allowed で打てる、辞書にある2文字語を集める。
+func dictPairs(g *Generator, allowed []string) map[string]bool {
+	set := newUnitSet(allowed)
+	pairs := map[string]bool{}
+	for _, w := range g.words {
+		if units, ok := set.segment(w); ok && len(units) == 2 {
+			pairs[strings.Join(units, "")] = true
+		}
+	}
+	return pairs
+}
+
+func TestWordRandomPairBeyondTwoStage(t *testing.T) {
+	// 長さの上限が2でない段階でも、2文字の出題は辞書に縛られない
+	g := newGen(5)
+	allowed := curriculum.For(30)
+	inDict := dictPairs(g, allowed)
+
+	pairs, offDict := 0, 0
+	for range 300 {
+		word, err := g.Word(allowed, "", nil, 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(word) != 2 {
+			continue
+		}
+		pairs++
+		if !inDict[strings.Join(word, "")] {
+			offDict++
+		}
+	}
+	if pairs == 0 {
+		t.Fatal("2文字の出題が1回もない")
+	}
+	if offDict == 0 {
+		t.Errorf("2文字 %d 回すべてが辞書にある語だった", pairs)
+	}
+}
+
+func TestWordRandomPairKeepsNewestBeyondTwoStage(t *testing.T) {
+	// 組み合わせに置き換えても、新出かなを含む語だったことは保つ
+	cfg := DefaultConfig()
+	cfg.NewestRatio = 1
+	cfg.WeakRatio = 0
+	g := NewGenerator(cfg, rand.New(rand.NewSource(5)))
+	allowed := curriculum.For(30)
+	newest := allowed[len(allowed)-1]
+
+	for range 200 {
+		word, err := g.Word(allowed, newest, nil, 5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(word, newest) {
+			t.Fatalf("新出かな %q を含まない語が出た: %v", newest, word)
+		}
+	}
+}
+
 func TestWordRandomPairNewestBias(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.NewestRatio = 1 // 常に新出かなを含める

@@ -53,13 +53,23 @@ export const DEFAULT_GENERATOR_CONFIG: GeneratorConfig = {
 // 連発を抑えるために覚えておく、直近に出した語の数。
 const RECENT_MEMORY = 20;
 
-// 辞書を使わずに組み合わせを作る長さの段階。
-// 2文字の語は辞書の語彙が偏っていて同じ語ばかり出るので、この段階だけは
+// 辞書を使わずに組み合わせを作る長さ。
+// 辞書にある2文字の語は数が限られていて同じ語ばかり出るので、この長さは
 // 意味のない組み合わせも出して、かなの運指そのものを練習する。
 const RANDOM_PAIR_LEN = 2;
 
 function containsAny(units: string[], targets: string[]): boolean {
   return units.some((u) => targets.includes(u));
+}
+
+// 辞書から選んだ語のうち、組み合わせに置き換えても残すかなを返す。
+function keptUnit(
+  units: string[],
+  newest: string | null,
+  weak: string[],
+): string | null {
+  if (newest !== null && units.includes(newest)) return newest;
+  return units.find((u) => weak.includes(u)) ?? null;
 }
 
 // 指数分布 (平均1) の乱数。
@@ -80,15 +90,19 @@ export class Generator {
   // newest は新しく覚えているかな、weak は苦手なかな。新出かなを含む語を
   // newestRatio、苦手かなを含む語を weakRatio の割合で優先して出す。
   // 長さの範囲に新出かなを含む語がなければ、範囲を超えても出す。
-  // maxLen が 2 のときだけは辞書を引かず、かなをランダムに組み合わせる。
+  // ただし2文字の語だけは辞書を引かず、かなをランダムに組み合わせる。
   word(
     allowed: string[],
     newest: string | null,
     weak: string[],
     maxLen: number,
   ): string[] {
+    if (allowed.length === 0) {
+      throw new Error("使えるかながない");
+    }
+    // 2文字までの段階は、辞書を引かずに毎回かなを組み合わせる
     if (maxLen === RANDOM_PAIR_LEN) {
-      return this.randomPair(allowed, newest, weak);
+      return this.randomPair(allowed, this.forcedUnit(allowed, newest, weak));
     }
 
     const set = newUnitSet(allowed);
@@ -131,60 +145,52 @@ export class Generator {
       if (!this.recentlyShown(w, limit)) break;
       w = pool[this.pick(pool.length)];
     }
-    this.remember(w);
-    return w;
-  }
-
-  // allowed のかなから2つ選んで並べる。辞書にある語かどうかは問わない。
-  // 新出かなと苦手かなを出す割合は辞書から選ぶときと揃える。
-  private randomPair(
-    allowed: string[],
-    newest: string | null,
-    weak: string[],
-  ): string[] {
-    if (allowed.length === 0) {
-      throw new Error("使えるかながない");
-    }
-    const newestUnit =
-      newest !== null && allowed.includes(newest) ? newest : null;
-    const weakUnits = weak.filter((u) => allowed.includes(u));
-
-    // 組み合わせの総数は allowed の数の2乗。少ないうちは記憶を短くして、
-    // 選び直しが空回りするのを防ぐ
-    const limit = Math.min(
-      RECENT_MEMORY,
-      Math.floor((allowed.length * allowed.length) / 2),
-    );
-    let w = this.makePair(allowed, newestUnit, weakUnits);
-    for (let attempt = 0; attempt < 8; attempt++) {
-      if (!this.recentlyShown(w, limit)) break;
-      w = this.makePair(allowed, newestUnit, weakUnits);
+    // 選ばれたのが2文字なら、辞書にない組み合わせにも広げる。
+    // 選ばれた語が持っていた新出かなや苦手かなは組み合わせにも残す
+    if (w.length === RANDOM_PAIR_LEN) {
+      return this.randomPair(allowed, keptUnit(w, newest, weak));
     }
     this.remember(w);
     return w;
   }
 
-  // かな2つの組み合わせを1つ作る。新出かなか苦手かなを混ぜるときは、
-  // どちらの位置に置くかもランダムに決める。
-  private makePair(
-    allowed: string[],
-    newest: string | null,
-    weak: string[],
-  ): string[] {
+  // allowed のかなを2つ並べる。辞書にある語かどうかは問わない。
+  // forced が空でなければ、どちらか片方をそのかなにする。
+  private randomPair(allowed: string[], forced: string | null): string[] {
     const at = (n: number) => Math.floor(this.rand() * n);
-    const pair = [allowed[at(allowed.length)], allowed[at(allowed.length)]];
-    const r = this.rand();
-    let forced: string | null = null;
-    if (r < this.cfg.newestRatio && newest !== null) {
-      forced = newest;
-    } else if (
-      r < this.cfg.newestRatio + this.cfg.weakRatio &&
-      weak.length > 0
-    ) {
-      forced = weak[at(weak.length)];
+
+    // 作れる組み合わせの数。片方を固定すると一気に減るので、
+    // 記憶をその半分までに縮めて選び直しが空回りするのを防ぐ
+    const variants =
+      forced !== null ? 2 * allowed.length : allowed.length * allowed.length;
+    const limit = Math.min(RECENT_MEMORY, Math.floor(variants / 2));
+
+    let w: string[] = [];
+    for (let attempt = 0; attempt < 8; attempt++) {
+      w = [allowed[at(allowed.length)], allowed[at(allowed.length)]];
+      if (forced !== null) w[at(2)] = forced;
+      if (!this.recentlyShown(w, limit)) break;
     }
-    if (forced !== null) pair[at(2)] = forced;
-    return pair;
+    this.remember(w);
+    return w;
+  }
+
+  // 組み合わせに必ず入れるかなを選ぶ。新出かなを newestRatio、苦手かなを
+  // weakRatio の割合で選び、残りは null を返して2つともランダムに任せる。
+  // 未解放のかなが混ざっていたら使わない。
+  private forcedUnit(
+    allowed: string[],
+    newest: string | null,
+    weak: string[],
+  ): string | null {
+    const r = this.rand();
+    if (r < this.cfg.newestRatio && newest !== null && allowed.includes(newest))
+      return newest;
+    if (r < this.cfg.newestRatio + this.cfg.weakRatio) {
+      const avail = weak.filter((u) => allowed.includes(u));
+      if (avail.length > 0) return avail[Math.floor(this.rand() * avail.length)];
+    }
+    return null;
   }
 
   private pick(n: number): number {

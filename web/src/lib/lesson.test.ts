@@ -87,8 +87,8 @@ describe("Generator", () => {
     expect(() => g.word(["っ"], null, [], 0)).toThrow();
   });
 
-  describe("2文字の段階", () => {
-    it("辞書を引かずにかなを組み合わせる", () => {
+  describe("2文字の出題", () => {
+    it("2文字までの段階は辞書を引かずにかなを組み合わせる", () => {
       const g = new Generator(words(), undefined, seededRandom(3));
       const allowed = unitsFor(30);
       for (let i = 0; i < 50; i++) {
@@ -122,6 +122,41 @@ describe("Generator", () => {
       for (let i = 0; i < 20; i++) {
         expect(newestOnly.word(unitsFor(1), "る", [], 2)).toContain("る");
         expect(weakOnly.word(unitsFor(1), null, ["す"], 2)).toContain("す");
+      }
+    });
+
+    it("長さの上限が2でない段階でも辞書に縛られない", () => {
+      const g = new Generator(words(), undefined, seededRandom(5));
+      const allowed = unitsFor(30);
+      const inDict = new Set(
+        words()
+          .map((w) => segment(w, allowed))
+          .filter((u): u is string[] => u !== null && u.length === 2)
+          .map((u) => u.join("")),
+      );
+
+      let pairs = 0;
+      let offDict = 0;
+      for (let i = 0; i < 300; i++) {
+        const word = g.word(allowed, null, [], 5);
+        if (word.length !== 2) continue;
+        pairs++;
+        if (!inDict.has(word.join(""))) offDict++;
+      }
+      expect(pairs).toBeGreaterThan(0);
+      expect(offDict).toBeGreaterThan(0);
+    });
+
+    it("組み合わせに置き換えても新出かなは残る", () => {
+      const g = new Generator(
+        words(),
+        { newestRatio: 1, weakRatio: 0, skew: 2 },
+        seededRandom(5),
+      );
+      const allowed = unitsFor(30);
+      const newest = allowed[allowed.length - 1];
+      for (let i = 0; i < 200; i++) {
+        expect(g.word(allowed, newest, [], 5)).toContain(newest);
       }
     });
 

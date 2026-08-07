@@ -27,8 +27,8 @@ func DefaultConfig() Config {
 // recentMemory は連発を抑えるために覚えておく、直近に出した語の数。
 const recentMemory = 20
 
-// randomPairLen は辞書を使わずに組み合わせを作る長さの段階。
-// 2文字の語は辞書の語彙が偏っていて同じ語ばかり出るので、この段階だけは
+// randomPairLen は辞書を使わずに組み合わせを作る長さ。
+// 辞書にある2文字の語は数が限られていて同じ語ばかり出るので、この長さは
 // 意味のない組み合わせも出して、かなの運指そのものを練習する。
 const randomPairLen = 2
 
@@ -61,10 +61,14 @@ func NewGenerator(cfg Config, rnd *rand.Rand) *Generator {
 // maxLen は単語の最大文字数（単位数）で、0 なら無制限。
 // newest は新しく覚えているかな、weak は苦手なかな。新出かなを含む語を
 // NewestRatio、苦手かなを含む語を WeakRatio の割合で優先して出す。
-// maxLen が 2 のときだけは辞書を引かず、かなをランダムに組み合わせる。
+// ただし2文字の語だけは辞書を引かず、かなをランダムに組み合わせる。
 func (g *Generator) Word(allowed []string, newest string, weak []string, maxLen int) ([]string, error) {
+	if len(allowed) == 0 {
+		return nil, fmt.Errorf("使えるかながない")
+	}
+	// 2文字までの段階は、辞書を引かずに毎回かなを組み合わせる
 	if maxLen == randomPairLen {
-		return g.randomPair(allowed, newest, weak)
+		return g.randomPair(allowed, g.forcedUnit(allowed, newest, weak)), nil
 	}
 
 	set := newUnitSet(allowed)
@@ -124,55 +128,72 @@ func (g *Generator) Word(allowed []string, newest string, weak []string, maxLen 
 			break
 		}
 	}
+	// 選ばれたのが2文字なら、辞書にない組み合わせにも広げる。
+	// 選ばれた語が持っていた新出かなや苦手かなは組み合わせにも残す
+	if len(w) == randomPairLen {
+		return g.randomPair(allowed, keptUnit(w, newest, weak)), nil
+	}
 	g.remember(w)
 	return w, nil
 }
 
-// randomPair は allowed のかなから2つ選んで並べる。辞書にある語かどうかは
-// 問わない。新出かなと苦手かなを出す割合は辞書から選ぶときと揃える。
-func (g *Generator) randomPair(allowed []string, newest string, weak []string) ([]string, error) {
-	if len(allowed) == 0 {
-		return nil, fmt.Errorf("使えるかながない")
+// randomPair は allowed のかなを2つ並べる。辞書にある語かどうかは問わない。
+// forced が空でなければ、どちらか片方をそのかなにする。
+func (g *Generator) randomPair(allowed []string, forced string) []string {
+	// 作れる組み合わせの数。片方を固定すると一気に減るので、
+	// 記憶をその半分までに縮めて選び直しが空回りするのを防ぐ
+	variants := len(allowed) * len(allowed)
+	if forced != "" {
+		variants = 2 * len(allowed)
 	}
-	if !slices.Contains(allowed, newest) {
-		newest = ""
-	}
-	weak = slices.DeleteFunc(slices.Clone(weak), func(u string) bool {
-		return !slices.Contains(allowed, u)
-	})
+	limit := min(recentMemory, variants/2)
 
-	// 組み合わせの総数は allowed の数の2乗。少ないうちは記憶を短くして、
-	// 選び直しが空回りするのを防ぐ
-	limit := min(recentMemory, len(allowed)*len(allowed)/2)
 	var w []string
 	for range 8 {
-		w = g.makePair(allowed, newest, weak)
+		w = []string{
+			allowed[g.Rand.Intn(len(allowed))],
+			allowed[g.Rand.Intn(len(allowed))],
+		}
+		if forced != "" {
+			w[g.Rand.Intn(2)] = forced
+		}
 		if !g.recentlyShown(w, limit) {
 			break
 		}
 	}
 	g.remember(w)
-	return w, nil
+	return w
 }
 
-// makePair はかな2つの組み合わせを1つ作る。
-// 新出かなか苦手かなを混ぜるときは、どちらの位置に置くかもランダムに決める。
-func (g *Generator) makePair(allowed []string, newest string, weak []string) []string {
-	pair := []string{
-		allowed[g.Rand.Intn(len(allowed))],
-		allowed[g.Rand.Intn(len(allowed))],
-	}
-	var forced string
+// forcedUnit は組み合わせに必ず入れるかなを選ぶ。新出かなを NewestRatio、
+// 苦手かなを WeakRatio の割合で選び、残りは空を返して2つともランダムに任せる。
+// 未解放のかなが混ざっていたら使わない。
+func (g *Generator) forcedUnit(allowed []string, newest string, weak []string) string {
 	switch r := g.Rand.Float64(); {
-	case r < g.Cfg.NewestRatio && newest != "":
-		forced = newest
-	case r < g.Cfg.NewestRatio+g.Cfg.WeakRatio && len(weak) > 0:
-		forced = weak[g.Rand.Intn(len(weak))]
+	case r < g.Cfg.NewestRatio && slices.Contains(allowed, newest):
+		return newest
+	case r < g.Cfg.NewestRatio+g.Cfg.WeakRatio:
+		avail := slices.DeleteFunc(slices.Clone(weak), func(u string) bool {
+			return !slices.Contains(allowed, u)
+		})
+		if len(avail) > 0 {
+			return avail[g.Rand.Intn(len(avail))]
+		}
 	}
-	if forced != "" {
-		pair[g.Rand.Intn(2)] = forced
+	return ""
+}
+
+// keptUnit は辞書から選んだ語のうち、組み合わせに置き換えても残すかなを返す。
+func keptUnit(units []string, newest string, weak []string) string {
+	if newest != "" && slices.Contains(units, newest) {
+		return newest
 	}
-	return pair
+	for _, u := range units {
+		if slices.Contains(weak, u) {
+			return u
+		}
+	}
+	return ""
 }
 
 func (g *Generator) recentlyShown(units []string, limit int) bool {
