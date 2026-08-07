@@ -65,23 +65,78 @@ describe("Generator", () => {
     const g = new Generator(words(), undefined, seededRandom(3));
     const allowed = unitsFor(30);
     for (let i = 0; i < 50; i++) {
-      expect(g.word(allowed, null, [], 2).length).toBeLessThanOrEqual(2);
+      expect(g.word(allowed, null, [], 3).length).toBeLessThanOrEqual(3);
     }
   });
 
   it("新出かなを含む語がないときは長さを超えて出す", () => {
+    // 「ぢょ」を含む語は辞書では6文字が最短
     const g = new Generator(
       words(),
       { newestRatio: 1, weakRatio: 0, skew: 2 },
       seededRandom(1),
     );
     const allowed = unitsFor(maxLevel());
-    const word = g.word(allowed, "ぴゃ", [], 2);
-    expect(word).toContain("ぴゃ");
+    const word = g.word(allowed, "ぢょ", [], 3);
+    expect(word).toContain("ぢょ");
+    expect(word.length).toBeGreaterThan(3);
   });
 
   it("打てる語がなければ例外", () => {
     const g = new Generator(words(), undefined, seededRandom(1));
     expect(() => g.word(["っ"], null, [], 0)).toThrow();
+  });
+
+  describe("2文字の段階", () => {
+    it("辞書を引かずにかなを組み合わせる", () => {
+      const g = new Generator(words(), undefined, seededRandom(3));
+      const allowed = unitsFor(30);
+      for (let i = 0; i < 50; i++) {
+        const word = g.word(allowed, null, [], 2);
+        expect(word.length).toBe(2);
+        for (const u of word) expect(allowed).toContain(u);
+      }
+    });
+
+    it("辞書にない組み合わせも出る", () => {
+      const g = new Generator(words(), undefined, seededRandom(11));
+      const allowed = unitsFor(1);
+      const seen = new Set<string>();
+      for (let i = 0; i < 200; i++) {
+        seen.add(g.word(allowed, null, [], 2).join(""));
+      }
+      expect(seen.size).toBeGreaterThanOrEqual(20);
+    });
+
+    it("新出かなと苦手かなの割合は変わらない", () => {
+      const newestOnly = new Generator(
+        words(),
+        { newestRatio: 1, weakRatio: 0, skew: 2 },
+        seededRandom(1),
+      );
+      const weakOnly = new Generator(
+        words(),
+        { newestRatio: 0, weakRatio: 1, skew: 2 },
+        seededRandom(1),
+      );
+      for (let i = 0; i < 20; i++) {
+        expect(newestOnly.word(unitsFor(1), "る", [], 2)).toContain("る");
+        expect(weakOnly.word(unitsFor(1), null, ["す"], 2)).toContain("す");
+      }
+    });
+
+    it("未解放のかなは newest や weak に混ざっても出題に使わない", () => {
+      const g = new Generator(
+        words(),
+        { newestRatio: 0.5, weakRatio: 0.5, skew: 2 },
+        seededRandom(1),
+      );
+      const allowed = unitsFor(1);
+      for (let i = 0; i < 50; i++) {
+        for (const u of g.word(allowed, "ぱ", ["ぴょ"], 2)) {
+          expect(allowed).toContain(u);
+        }
+      }
+    });
   });
 });

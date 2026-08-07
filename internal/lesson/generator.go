@@ -27,6 +27,11 @@ func DefaultConfig() Config {
 // recentMemory は連発を抑えるために覚えておく、直近に出した語の数。
 const recentMemory = 20
 
+// randomPairLen は辞書を使わずに組み合わせを作る長さの段階。
+// 2文字の語は辞書の語彙が偏っていて同じ語ばかり出るので、この段階だけは
+// 意味のない組み合わせも出して、かなの運指そのものを練習する。
+const randomPairLen = 2
+
 // Generator は辞書から練習する単語を選ぶ。
 type Generator struct {
 	Cfg    Config
@@ -56,7 +61,12 @@ func NewGenerator(cfg Config, rnd *rand.Rand) *Generator {
 // maxLen は単語の最大文字数（単位数）で、0 なら無制限。
 // newest は新しく覚えているかな、weak は苦手なかな。新出かなを含む語を
 // NewestRatio、苦手かなを含む語を WeakRatio の割合で優先して出す。
+// maxLen が 2 のときだけは辞書を引かず、かなをランダムに組み合わせる。
 func (g *Generator) Word(allowed []string, newest string, weak []string, maxLen int) ([]string, error) {
+	if maxLen == randomPairLen {
+		return g.randomPair(allowed, newest, weak)
+	}
+
 	set := newUnitSet(allowed)
 
 	// 頻度順を保ったまま、打てる語だけに絞る
@@ -116,6 +126,53 @@ func (g *Generator) Word(allowed []string, newest string, weak []string, maxLen 
 	}
 	g.remember(w)
 	return w, nil
+}
+
+// randomPair は allowed のかなから2つ選んで並べる。辞書にある語かどうかは
+// 問わない。新出かなと苦手かなを出す割合は辞書から選ぶときと揃える。
+func (g *Generator) randomPair(allowed []string, newest string, weak []string) ([]string, error) {
+	if len(allowed) == 0 {
+		return nil, fmt.Errorf("使えるかながない")
+	}
+	if !slices.Contains(allowed, newest) {
+		newest = ""
+	}
+	weak = slices.DeleteFunc(slices.Clone(weak), func(u string) bool {
+		return !slices.Contains(allowed, u)
+	})
+
+	// 組み合わせの総数は allowed の数の2乗。少ないうちは記憶を短くして、
+	// 選び直しが空回りするのを防ぐ
+	limit := min(recentMemory, len(allowed)*len(allowed)/2)
+	var w []string
+	for range 8 {
+		w = g.makePair(allowed, newest, weak)
+		if !g.recentlyShown(w, limit) {
+			break
+		}
+	}
+	g.remember(w)
+	return w, nil
+}
+
+// makePair はかな2つの組み合わせを1つ作る。
+// 新出かなか苦手かなを混ぜるときは、どちらの位置に置くかもランダムに決める。
+func (g *Generator) makePair(allowed []string, newest string, weak []string) []string {
+	pair := []string{
+		allowed[g.Rand.Intn(len(allowed))],
+		allowed[g.Rand.Intn(len(allowed))],
+	}
+	var forced string
+	switch r := g.Rand.Float64(); {
+	case r < g.Cfg.NewestRatio && newest != "":
+		forced = newest
+	case r < g.Cfg.NewestRatio+g.Cfg.WeakRatio && len(weak) > 0:
+		forced = weak[g.Rand.Intn(len(weak))]
+	}
+	if forced != "" {
+		pair[g.Rand.Intn(2)] = forced
+	}
+	return pair
 }
 
 func (g *Generator) recentlyShown(units []string, limit int) bool {

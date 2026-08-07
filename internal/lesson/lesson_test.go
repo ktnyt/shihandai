@@ -3,6 +3,7 @@ package lesson
 import (
 	"math/rand"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ktnyt/shihandai/internal/curriculum"
@@ -129,18 +130,18 @@ func TestWordRespectsMaxLen(t *testing.T) {
 	g := newGen(3)
 	allowed := curriculum.For(30)
 	for range 50 {
-		word, err := g.Word(allowed, "", nil, 2)
+		word, err := g.Word(allowed, "", nil, 3)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(word) > 2 {
-			t.Fatalf("最大2文字のはずが %v が出た", word)
+		if len(word) > 3 {
+			t.Fatalf("最大3文字のはずが %v が出た", word)
 		}
 	}
 }
 
 func TestWordNewestFallbackBeyondMaxLen(t *testing.T) {
-	// 「ぴゃ」を含む2文字語は辞書にないので、新出かなを優先するときは
+	// 「ぢょ」を含む語は辞書では6文字が最短なので、新出かなを優先するときは
 	// 長さ制限を超えてでも出す
 	cfg := DefaultConfig()
 	cfg.NewestRatio = 1
@@ -148,12 +149,107 @@ func TestWordNewestFallbackBeyondMaxLen(t *testing.T) {
 	g := NewGenerator(cfg, rand.New(rand.NewSource(1)))
 	allowed := curriculum.For(curriculum.MaxLevel())
 
-	word, err := g.Word(allowed, "ぴゃ", nil, 2)
+	word, err := g.Word(allowed, "ぢょ", nil, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(word, "ぴゃ") {
+	if !slices.Contains(word, "ぢょ") {
 		t.Fatalf("新出かなを含まない語が出た: %v", word)
+	}
+	if len(word) <= 3 {
+		t.Fatalf("長さ制限を超える語が出るはずが %v だった", word)
+	}
+}
+
+func TestWordRandomPairAtTwo(t *testing.T) {
+	// 2文字の段階は辞書を引かず、解放済みのかなを組み合わせる
+	g := newGen(3)
+	allowed := curriculum.For(30)
+	for range 50 {
+		word, err := g.Word(allowed, "", nil, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(word) != 2 {
+			t.Fatalf("2文字のはずが %v が出た", word)
+		}
+		for _, u := range word {
+			if !slices.Contains(allowed, u) {
+				t.Fatalf("使えないかな %q が含まれる: %v", u, word)
+			}
+		}
+	}
+}
+
+func TestWordRandomPairIgnoresDict(t *testing.T) {
+	// 辞書にない組み合わせも出るので、レベル1でも25通りの多くが顔を出す
+	g := newGen(11)
+	allowed := curriculum.For(1)
+	seen := map[string]bool{}
+	for range 200 {
+		word, err := g.Word(allowed, "", nil, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen[strings.Join(word, "")] = true
+	}
+	if len(seen) < 20 {
+		t.Errorf("200回で %d 種類しか出ていない (20種類以上出るべき)", len(seen))
+	}
+}
+
+func TestWordRandomPairNewestBias(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.NewestRatio = 1 // 常に新出かなを含める
+	cfg.WeakRatio = 0
+	g := NewGenerator(cfg, rand.New(rand.NewSource(1)))
+
+	for range 20 {
+		word, err := g.Word(curriculum.For(1), "る", nil, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(word, "る") {
+			t.Errorf("新出かな「る」を含まない組み合わせが出た: %v", word)
+		}
+	}
+}
+
+func TestWordRandomPairWeakBias(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.NewestRatio = 0
+	cfg.WeakRatio = 1 // 常に苦手かなを含める
+	g := NewGenerator(cfg, rand.New(rand.NewSource(1)))
+
+	for range 20 {
+		word, err := g.Word(curriculum.For(1), "", []string{"す"}, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(word, "す") {
+			t.Errorf("苦手かな「す」を含まない組み合わせが出た: %v", word)
+		}
+	}
+}
+
+func TestWordRandomPairSkipsUnavailableUnits(t *testing.T) {
+	// 未解放のかなは newest や weak に混ざっても出題に使わない
+	cfg := DefaultConfig()
+	cfg.NewestRatio = 0.5
+	cfg.WeakRatio = 0.5
+	g := NewGenerator(cfg, rand.New(rand.NewSource(1)))
+	allowed := curriculum.For(1)
+
+	for range 50 {
+		word, err := g.Word(allowed, "ぱ", []string{"ぴょ"}, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, u := range word {
+			if !slices.Contains(allowed, u) {
+				t.Fatalf("使えないかな %q が含まれる: %v", u, word)
+			}
+		}
 	}
 }
 
